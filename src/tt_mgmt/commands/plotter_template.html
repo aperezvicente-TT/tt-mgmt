@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TT Metrics Plotter</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10.3.1/dist/gridstack.min.css">
+<script src="https://cdn.jsdelivr.net/npm/gridstack@10.3.1/dist/gridstack-all.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+#header{padding:8px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-shrink:0;background:var(--surface)}
+#header h1{color:var(--accent);font-size:18px;white-space:nowrap}
+#header .meta{color:var(--dim);font-size:13px;display:flex;gap:16px;flex-wrap:wrap}
+#header .meta b{color:var(--text)}
+#header button{background:var(--border);border:none;color:var(--text);padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px}
+#header button:hover{background:var(--accent);color:#000}
+#live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:none;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+#main{display:flex;flex:1;overflow:hidden}
+#sidebar{width:220px;min-width:180px;border-right:1px solid var(--border);overflow-y:auto;padding:10px;flex-shrink:0;background:var(--surface)}
+#sidebar h3{color:var(--accent);font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px;cursor:default;user-select:none}
+#sidebar h3:first-child{margin-top:0}
+.tree-group{margin:0 0 2px}
+.tree-toggle{display:flex;align-items:center;padding:3px 4px;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px;user-select:none;color:var(--dim);gap:4px}
+.tree-toggle:hover{background:var(--border);color:var(--text)}
+.tree-toggle .arrow{display:inline-block;width:10px;font-size:8px;transition:transform .15s;flex-shrink:0}
+.tree-toggle.open .arrow{transform:rotate(90deg)}
+.tree-toggle .tg-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-toggle .tg-dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.tree-children{display:none;padding-left:8px}
+.tree-toggle.open+.tree-children{display:block}
+.tree-item{padding:3px 8px;font-size:12px;cursor:grab;border-radius:4px;margin:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree-item:hover{background:var(--border)}
+.tree-item.selected{background:rgba(88,166,255,.18);outline:1px solid var(--accent)}
+.tree-item.dragging{opacity:.4}
+.tree-item .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+.sel-badge{position:fixed;pointer-events:none;z-index:9999;background:var(--accent);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 6px;transform:translate(12px,-8px)}
+#canvas{flex:1;overflow-y:auto;overflow-x:hidden;padding:4px}
+.grid-stack{min-height:100%}
+.grid-stack-item-content{background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:visible;display:flex;flex-direction:column;position:relative}
+.grid-stack-item-content.drop-target{outline:2px dashed var(--accent);outline-offset:-2px}
+.gs-resizing .grid-stack-item-content{overflow:hidden}
+.grid-stack-item>.ui-resizable-se,.grid-stack-item>.ui-resizable-sw,
+.grid-stack-item>.ui-resizable-e,.grid-stack-item>.ui-resizable-w,
+.grid-stack-item>.ui-resizable-s{z-index:20}
+.ui-resizable-se{cursor:se-resize !important;width:12px !important;height:12px !important;right:2px !important;bottom:2px !important;
+  background:var(--accent);border-radius:2px;opacity:.5}
+.ui-resizable-se:hover{opacity:1}
+.ui-resizable-e{cursor:e-resize !important;width:6px !important;right:0 !important;top:10% !important;height:80% !important;
+  background:var(--border);border-radius:2px;opacity:0;transition:opacity .15s}
+.grid-stack-item:hover .ui-resizable-e{opacity:.6}
+.ui-resizable-s{cursor:s-resize !important;height:6px !important;bottom:0 !important;left:10% !important;width:80% !important;
+  background:var(--border);border-radius:2px;opacity:0;transition:opacity .15s}
+.grid-stack-item:hover .ui-resizable-s{opacity:.6}
+.ui-resizable-w{cursor:w-resize !important;width:6px !important;left:0 !important;top:10% !important;height:80% !important;
+  background:var(--border);border-radius:2px;opacity:0;transition:opacity .15s}
+.grid-stack-item:hover .ui-resizable-w{opacity:.6}
+.panel-hdr{display:flex;align-items:center;padding:2px 8px;border-bottom:1px solid var(--border);min-height:26px;font-size:12px;font-weight:600;flex-shrink:0;cursor:grab}
+.panel-hdr .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+.panel-hdr button{background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;padding:0 4px;border-radius:3px}
+.panel-hdr button:hover{background:var(--border);color:var(--text)}
+.panel-chart{flex:1;min-height:0;position:relative;overflow:hidden}
+.crosshair{position:absolute;top:0;bottom:0;width:1px;pointer-events:none;z-index:10;display:none;background:var(--accent);opacity:.55}
+#empty-hint{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim);font-size:14px;text-align:center;pointer-events:none}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>TT Metrics Plotter</h1>
+  <div id="live-dot"></div>
+  <div class="meta" id="meta-info"></div>
+  <button onclick="resetAllZoom()" title="Reset all charts to full time range">Reset Zoom</button>
+  <button onclick="clearAll()" title="Remove all charts" style="background:#f85149">Clear All</button>
+  <label style="margin-left:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:#fff;background:#30363d;padding:2px 8px;border-radius:4px;border:1px solid #484f58" title="When checked, multi-select creates one chart per metric. Uncheck to combine into one chart.">
+    <input type="checkbox" id="separate-charts-toggle" checked> Separate charts
+  </label>
+</div>
+
+<div id="main">
+  <div id="sidebar"><div id="sidebar-content"></div></div>
+  <div id="canvas">
+    <div class="grid-stack" id="grid"></div>
+    <div id="empty-hint">Drag metrics from the sidebar to create charts.<br>Drop onto an existing chart to overlay.</div>
+  </div>
+</div>
+
+<script>
+// ── Data placeholders (replaced by Python) ──────────────────────────────
+// __TT_DATA_INJECT__ — do not remove this marker
+window.TT_DATA = window.TT_DATA || null;
+window.TT_LIVE = window.TT_LIVE || null;
+
+const PAL=['#58a6ff','#f0883e','#3fb950','#bc8cff','#f85149','#d29922','#79c0ff','#56d364','#e3b341','#ff7b72','#a5d6ff','#ffa657','#7ee787','#d2a8ff','#ff9bce','#76e4f7'];
+let _ci=0; const _dcm={},_pcm={};
+function dColor(id){return _dcm[id]||(_dcm[id]=PAL[_ci++%PAL.length]);}
+function pColor(id){return _pcm[id]||(_pcm[id]=PAL[_ci++%PAL.length]);}
+
+const DMET={
+  temperature:{label:'ASIC Temp',unit:'°C'},power:{label:'Power',unit:'W'},
+  input_power_w:{label:'Input Pwr',unit:'W'},
+  voltage_v:{label:'VCORE',unit:'V'},current_a:{label:'TDC',unit:'A'},
+  aiclk_mhz:{label:'AICLK',unit:'MHz'},
+  fan_speed_rpm:{label:'Fan',unit:'RPM'},
+  used_dram_mib:{label:'DRAM',unit:'MiB'},used_trace_mib:{label:'Trace',unit:'MiB'},
+  used_l1_mib:{label:'L1',unit:'MiB'},used_l1_small_mib:{label:'L1 Sm',unit:'MiB'},used_cb_mib:{label:'CB',unit:'MiB'},
+};
+const PMET={
+  cpu_percent:{label:'CPU',unit:'%'},vm_rss_mib:{label:'RSS',unit:'MiB'},vm_virt_mib:{label:'Virt',unit:'MiB'},
+  num_threads:{label:'Threads',unit:''},
+  dram_mib:{label:'Proc DRAM',unit:'MiB'},l1_mib:{label:'Proc L1',unit:'MiB'},
+  l1_small_mib:{label:'Proc L1sm',unit:'MiB'},trace_mib:{label:'Proc Trace',unit:'MiB'},cb_mib:{label:'Proc CB',unit:'MiB'},
+};
+
+// ── Downsample (min-max preserving) ─────────────────────────────────────
+const MAX_PTS=2000;
+function ds(xs,ys){
+  const n=xs.length;if(n<=MAX_PTS)return[xs,ys];
+  const bk=Math.floor(MAX_PTS/2),bsz=Math.ceil(n/bk),rx=[],ry=[];
+  for(let i=0;i<n;i+=bsz){
+    const e=Math.min(i+bsz,n);let mnV=Infinity,mxV=-Infinity,mnI=i,mxI=i;
+    for(let j=i;j<e;j++){const v=ys[j];if(v!=null){if(v<mnV){mnV=v;mnI=j;}if(v>mxV){mxV=v;mxI=j;}}}
+    const a=Math.min(mnI,mxI),b=Math.max(mnI,mxI);
+    rx.push(xs[a]);ry.push(ys[a]);if(a!==b){rx.push(xs[b]);ry.push(ys[b]);}
+  } return[rx,ry];
+}
+function hasData(a){return a&&a.some(v=>v!=null&&v!==0);}
+
+// ── Data adapters ───────────────────────────────────────────────────────
+let adapter=null;
+class OfflineAdapter{
+  constructor(d){this._d=d;}
+  get ts(){return this._d.timestamps||[];}
+  devIds(){return Object.keys(this._d.devices||{});}
+  pids(){return Object.keys(this._d.processes||{});}
+  pName(p){const e=(this._d.processes||{})[p];return e?e.name:String(p);}
+  pCmd(p){const e=(this._d.processes||{})[p];return e?e.cmdline:'';}
+  dVal(id,m){return((this._d.devices||{})[id]||{})[m]||[];}
+  pVal(p,m){return((this._d.processes||{})[p]||{})[m]||[];}
+  hasD(id,m){return hasData(this.dVal(id,m));}
+  hasP(p,m){return hasData(this.pVal(p,m));}
+}
+
+class LiveAdapter{
+  constructor(c){this.url=c.url;this.interval=c.interval||1000;this.maxPts=c.maxPoints||600;
+    this.timestamps=[];this.devices={};this.processes={};this.running=false;this.cbs=[];}
+  get ts(){return this.timestamps;}
+  devIds(){return Object.keys(this.devices);}
+  pids(){return Object.keys(this.processes);}
+  pName(p){return(this.processes[p]||{}).name||String(p);}
+  pCmd(p){return(this.processes[p]||{}).cmdline||'';}
+  dVal(id,m){return(this.devices[id]||{})[m]||[];}
+  pVal(p,m){return(this.processes[p]||{})[m]||[];}
+  hasD(id,m){return hasData(this.dVal(id,m));}
+  hasP(p,m){return hasData(this.pVal(p,m));}
+  onUpdate(cb){this.cbs.push(cb);}
+  start(){if(!this.running){this.running=true;this._poll();}}
+  async _poll(){
+    while(this.running){
+      try{await this._fetch();}catch(e){console.warn('Poll:',e);}
+      this.cbs.forEach(cb=>{try{cb();}catch(e){console.error(e);}});
+      await new Promise(r=>setTimeout(r,this.interval));
+    }
+  }
+  async _fetch(){
+    const r=await fetch(this.url);const list=await r.json();
+    const now=this.timestamps.length?this.timestamps[this.timestamps.length-1]+this.interval/1000:0;
+    this.timestamps.push(now);if(this.timestamps.length>this.maxPts)this.timestamps.shift();
+    const M=1048576;
+    for(const dev of(Array.isArray(list)?list:[])){
+      const id=dev.display_id||dev.chip_id||'?';
+      if(!this.devices[id])this.devices[id]={};
+      const d=this.devices[id],t=dev.telemetry||{},m=dev.memory||{};
+      const p=(k,v)=>{if(!d[k])d[k]=[];d[k].push(v);if(d[k].length>this.maxPts)d[k].shift();};
+      p('temperature',t.temperature);p('power',t.power);p('input_power_w',t.input_power_w);
+      p('voltage_v',(t.voltage_mv||0)/1000);p('current_a',t.current_ma||0);
+      p('aiclk_mhz',t.aiclk_mhz);p('fan_speed_rpm',t.fan_speed_rpm);
+      p('used_dram_mib',(m.used_dram||0)/M);p('used_trace_mib',(m.used_trace||0)/M);
+      p('used_l1_mib',(m.used_l1||0)/M);p('used_l1_small_mib',(m.used_l1_small||0)/M);p('used_cb_mib',(m.used_cb||0)/M);
+      for(const proc of(dev.processes||[])){
+        const pid=proc.pid;if(!pid)continue;
+        if(!this.processes[pid])this.processes[pid]={name:proc.name||String(pid),cmdline:proc.cmdline||''};
+        const pp=this.processes[pid];
+        const q=(k,v)=>{if(!pp[k])pp[k]=[];pp[k].push(v);if(pp[k].length>this.maxPts)pp[k].shift();};
+        q('cpu_percent',proc.cpu_percent);q('vm_rss_mib',(proc.vm_rss_kb||0)/1024);
+        q('vm_virt_mib',(proc.vm_virt_kb||0)/1024);q('num_threads',proc.num_threads);
+        q('dram_mib',(proc.dram||0)/M);q('l1_mib',(proc.l1||0)/M);
+        q('l1_small_mib',(proc.l1_small||0)/M);q('trace_mib',(proc.trace||0)/M);q('cb_mib',(proc.cb||0)/M);
+      }
+    }
+  }
+}
+
+// ── Panel state ─────────────────────────────────────────────────────────
+let grid=null;
+let nextPid=0;
+const panels={};   // id -> {id, title, unit, traces, chartDiv, widget}
+
+const PCFG={responsive:false,scrollZoom:true,displaylogo:false,
+  modeBarButtonsToRemove:['lasso2d','select2d','toImage','autoScale2d'],
+  modeBarButtonsToAdd:[{name:'PNG',icon:Plotly.Icons.camera,
+    click:gd=>Plotly.downloadImage(gd,{format:'png',width:1600,height:400,filename:'tt-metrics'})}]};
+const AX={color:'#8b949e',gridcolor:'rgba(48,54,61,0.35)',zeroline:false,tickfont:{size:10},titlefont:{size:11}};
+
+// ── Zoom sync (debounced) ───────────────────────────────────────────────
+let _syncing=false;
+function syncX(srcDiv,ev){
+  if(_syncing)return; _syncing=true;
+  const u={};
+  if('xaxis.range[0]'in ev){u['xaxis.range']=[ev['xaxis.range[0]'],ev['xaxis.range[1]']];}
+  else if('xaxis.autorange'in ev){u['xaxis.autorange']=true;}
+  else{_syncing=false;return;}
+  for(const p of Object.values(panels)){
+    if(p.chartDiv&&p.chartDiv!==srcDiv)Plotly.relayout(p.chartDiv,u).catch(()=>{});
+  }
+  setTimeout(()=>{_syncing=false;},120);
+}
+
+function resetAllZoom(){
+  _syncing=true;
+  const u={'xaxis.autorange':true,'yaxis.autorange':true};
+  for(const p of Object.values(panels)){if(p.chartDiv)Plotly.relayout(p.chartDiv,u).catch(()=>{});}
+  setTimeout(()=>{_syncing=false;},120);
+}
+
+// ── Cross-chart hover sync (CSS crosshair, GPU-accelerated) ─────────────
+let _hoverRaf=0;
+function onChartHover(srcDiv,xval){
+  if(_hoverRaf)cancelAnimationFrame(_hoverRaf);
+  _hoverRaf=requestAnimationFrame(()=>{
+    for(const p of Object.values(panels)){
+      if(!p.chartDiv||p.chartDiv===srcDiv)continue;
+      const ch=p.chartDiv.parentElement.querySelector('.crosshair');
+      if(!ch)continue;
+      try{
+        const ax=p.chartDiv._fullLayout.xaxis;
+        const px=ax._offset+ax.l2p(xval);
+        ch.style.transform='translateX('+px+'px)';
+        ch.style.display='block';
+      }catch(e){ch.style.display='none';}
+    }
+  });
+}
+function onChartUnhover(){
+  if(_hoverRaf){cancelAnimationFrame(_hoverRaf);_hoverRaf=0;}
+  document.querySelectorAll('.crosshair').forEach(c=>c.style.display='none');
+}
+
+// ── Render a single panel's Plotly chart ────────────────────────────────
+function renderChart(id){
+  const panel=panels[id];
+  if(!panel||!panel.chartDiv)return;
+  const div=panel.chartDiv;
+  const wrap=div.parentElement;
+  const rect=wrap?wrap.getBoundingClientRect():div.getBoundingClientRect();
+  const w=Math.max(rect.width,200);
+  const h=Math.max(rect.height,80);
+  const ts=adapter.ts;
+
+  const traces=panel.traces.map(tr=>{
+    const vals=tr.type==='device'?adapter.dVal(tr.id,tr.metric):adapter.pVal(tr.id,tr.metric);
+    const[dx,dy]=ds(ts,vals||[]);
+    return{x:dx,y:dy,type:'scatter',mode:'lines',name:tr.name,
+      line:{color:tr.color,width:1.5,dash:tr.dash||'solid'},
+      hovertemplate:'%{y:.2f}<extra>'+tr.name+'</extra>'};
+  });
+
+  const layout={
+    width:w,height:h,
+    margin:{t:4,r:10,b:24,l:50},
+    paper_bgcolor:'#161b22',plot_bgcolor:'#0d1117',
+    hovermode:'x unified',dragmode:'zoom',
+    legend:{orientation:'h',x:0,y:1.02,yanchor:'bottom',font:{size:10,color:'#8b949e'},bgcolor:'rgba(0,0,0,0)'},
+    xaxis:{...AX,showspikes:true,spikemode:'across',spikethickness:1,spikecolor:'#58a6ff',spikedash:'dot'},
+    yaxis:{...AX,title:{text:panel.unit||'',font:{size:11,color:'#8b949e'}}},
+  };
+
+  Plotly.react(div,traces,layout,PCFG);
+
+  if(!div._eventsAttached){
+    div._eventsAttached=true;
+    div.on('plotly_relayout',ev=>syncX(div,ev));
+    div.on('plotly_hover',data=>{
+      if(data.points&&data.points.length)onChartHover(div,data.points[0].x);
+    });
+    div.on('plotly_unhover',onChartUnhover);
+  }
+}
+
+// ── Panel CRUD ──────────────────────────────────────────────────────────
+function createPanel(title,unit,traces){
+  const id=nextPid++;
+
+  const container=document.createElement('div');
+  container.className='grid-stack-item';
+  container.setAttribute('gs-w','6');
+  container.setAttribute('gs-h','4');
+  container.setAttribute('gs-min-w','3');
+  container.setAttribute('gs-min-h','2');
+
+  const content=document.createElement('div');
+  content.className='grid-stack-item-content';
+  content.dataset.panelId=id;
+
+  const hdr=document.createElement('div');
+  hdr.className='panel-hdr';
+  hdr.innerHTML='<span class="title">'+title+(unit?' ('+unit+')':'')+'</span>'+
+    '<span style="display:flex;gap:2px">'+
+    '<button class="btn-reset" title="Reset zoom">&#x1f50d;</button>'+
+    '<button class="btn-close" title="Remove">&times;</button></span>';
+  content.appendChild(hdr);
+
+  const chartWrap=document.createElement('div');
+  chartWrap.className='panel-chart';
+  const chartDiv=document.createElement('div');
+  chartDiv.style.cssText='width:100%;height:100%';
+  chartWrap.appendChild(chartDiv);
+  const crosshair=document.createElement('div');
+  crosshair.className='crosshair';
+  chartWrap.appendChild(crosshair);
+  content.appendChild(chartWrap);
+  container.appendChild(content);
+
+  // Drop overlay on existing chart
+  content.addEventListener('dragover',e=>{e.preventDefault();content.classList.add('drop-target');});
+  content.addEventListener('dragleave',()=>content.classList.remove('drop-target'));
+  content.addEventListener('drop',e=>{
+    e.preventDefault();e.stopPropagation();content.classList.remove('drop-target');
+    try{handleDrop(JSON.parse(e.dataTransfer.getData('text/plain')),id);}catch(_){}
+  });
+
+  hdr.querySelector('.btn-reset').addEventListener('click',()=>resetAllZoom());
+  hdr.querySelector('.btn-close').addEventListener('click',()=>removePanel(id));
+
+  const widget=grid.addWidget(container);
+
+  panels[id]={id,title,unit,traces,chartDiv,widget:container,
+    titleEl:hdr.querySelector('.title')};
+
+  requestAnimationFrame(()=>renderChart(id));
+  document.getElementById('empty-hint').style.display='none';
+  return id;
+}
+
+function removePanel(id){
+  const p=panels[id];
+  if(!p)return;
+  if(p.chartDiv)try{Plotly.purge(p.chartDiv);}catch(e){}
+  grid.removeWidget(p.widget);
+  delete panels[id];
+  if(!Object.keys(panels).length)document.getElementById('empty-hint').style.display='';
+}
+
+function clearAll(){
+  for(const id of Object.keys(panels))removePanel(parseInt(id));
+}
+
+function addTracesToPanel(id,newTraces){
+  const p=panels[id];if(!p)return;
+  for(const nt of newTraces){
+    if(!p.traces.some(t=>t.type===nt.type&&String(t.id)===String(nt.id)&&t.metric===nt.metric))
+      p.traces.push(nt);
+  }
+  updatePanelTitle(p);
+  renderChart(id);
+}
+
+function updatePanelTitle(p){
+  const metrics=[...new Set(p.traces.map(t=>{
+    const m=t.type==='device'?DMET[t.metric]:PMET[t.metric];return m?m.label:t.metric;
+  }))];
+  const units=[...new Set(p.traces.map(t=>{
+    const m=t.type==='device'?DMET[t.metric]:PMET[t.metric];return m?m.unit:'';
+  }).filter(Boolean))];
+  p.title=metrics.join(' + '); p.unit=units.join('/');
+  if(p.titleEl)p.titleEl.textContent=p.title+(p.unit?' ('+p.unit+')':'');
+}
+
+function buildTracesForMetric(srcType,metric){
+  const meta=srcType==='device'?DMET[metric]:PMET[metric];
+  const dash=meta?meta.dash||'solid':'solid';
+  const ids=srcType==='device'?adapter.devIds():adapter.pids();
+  const multi=ids.length>1;
+  const out=[];
+  for(const id of ids){
+    const vals=srcType==='device'?adapter.dVal(id,metric):adapter.pVal(id,metric);
+    if(!hasData(vals))continue;
+    const color=srcType==='device'?dColor(id):pColor(id);
+    const pname=srcType==='process'?adapter.pName(id):id;
+    out.push({type:srcType,id,metric,color,dash,name:multi?pname:(meta?meta.label:metric)});
+  } return out;
+}
+
+// ── Handle drops ────────────────────────────────────────────────────────
+function _dropSingle(info,targetId){
+  if(info.dragType==='metric'){
+    const traces=buildTracesForMetric(info.sourceType,info.metric);
+    if(!traces.length)return;
+    if(targetId!=null){addTracesToPanel(targetId,traces);}
+    else{
+      const meta=info.sourceType==='device'?DMET[info.metric]:PMET[info.metric];
+      createPanel(meta?meta.label:info.metric,meta?meta.unit:'',traces);
+    }
+  }else if(info.dragType==='single'){
+    const meta=info.sourceType==='device'?DMET[info.metric]:PMET[info.metric];
+    const vals=info.sourceType==='device'?adapter.dVal(info.id,info.metric):adapter.pVal(info.id,info.metric);
+    if(!hasData(vals))return;
+    const color=info.sourceType==='device'?dColor(info.id):pColor(info.id);
+    const pname=info.sourceType==='process'?adapter.pName(info.id):String(info.id);
+    const trace={type:info.sourceType,id:info.id,metric:info.metric,color,
+      dash:meta?.dash||'solid',name:pname+(meta?' / '+meta.label:'')};
+    if(targetId!=null){addTracesToPanel(targetId,[trace]);}
+    else{createPanel(pname+' '+((meta&&meta.label)||info.metric),meta?meta.unit:'',[trace]);}
+  }
+}
+
+function handleDrop(info,targetId){
+  if(info.dragType==='multi'){
+    const fakeItems=info.items.map(d=>({dragData:d}));
+    const separate=(document.getElementById('separate-charts-toggle')||{}).checked!==false;
+    if(targetId!=null || (!separate||fakeItems.length===1)){
+      const traces=_resolveTraces(fakeItems);
+      if(!traces.length)return;
+      if(targetId!=null){addTracesToPanel(targetId,traces);}
+      else{createPanel(_selTitle(fakeItems),_selUnit(fakeItems),traces);}
+    }else{
+      const payload=fakeItems.map(it=>it.dragData);
+      let i=0;
+      function createNext(){
+        if(i<payload.length){
+          _dropSingle(payload[i],null);
+          i++;
+          requestAnimationFrame(createNext);
+        }
+      }
+      requestAnimationFrame(createNext);
+    }
+    _clearSel();
+  }else{
+    _dropSingle(info,targetId);
+  }
+}
+
+// ── Sidebar (multi-select) ──────────────────────────────────────────────
+let _selected=[];  // array of {el, dragData}
+let _lastClicked=null; // last clicked tree-item element for shift-range
+
+function _clearSel(){_selected.forEach(s=>s.el.classList.remove('selected'));_selected=[];}
+
+function _allItems(){return[...document.querySelectorAll('#sidebar-content .tree-item')];}
+
+function _toggleSel(el,dragData,ctrlKey,shiftKey){
+  if(shiftKey&&_lastClicked){
+    const all=_allItems();
+    const a=all.indexOf(_lastClicked),b=all.indexOf(el);
+    if(a>=0&&b>=0){
+      const lo=Math.min(a,b),hi=Math.max(a,b);
+      if(!ctrlKey)_clearSel();
+      for(let i=lo;i<=hi;i++){
+        const item=all[i];
+        if(!item.classList.contains('selected')){
+          item.classList.add('selected');
+          _selected.push({el:item,dragData:item._dragData});
+        }
+      }
+      _lastClicked=el;
+      return;
+    }
+  }
+  const idx=_selected.findIndex(s=>s.el===el);
+  if(ctrlKey){
+    if(idx>=0){el.classList.remove('selected');_selected.splice(idx,1);}
+    else{el.classList.add('selected');_selected.push({el,dragData});}
+  }else if(idx>=0){
+    // Clicked an already-selected item: keep selection intact for dblclick/drag
+    return;
+  }else{
+    _clearSel();el.classList.add('selected');_selected.push({el,dragData});
+  }
+  _lastClicked=el;
+}
+
+function _resolveTraces(items){
+  const traces=[];
+  for(const it of items){
+    const d=it.dragData;
+    if(d.dragType==='metric'){
+      traces.push(...buildTracesForMetric(d.sourceType,d.metric));
+    }else if(d.dragType==='single'){
+      const meta=d.sourceType==='device'?DMET[d.metric]:PMET[d.metric];
+      const vals=d.sourceType==='device'?adapter.dVal(d.id,d.metric):adapter.pVal(d.id,d.metric);
+      if(!hasData(vals))continue;
+      const color=d.sourceType==='device'?dColor(d.id):pColor(d.id);
+      const pname=d.sourceType==='process'?adapter.pName(d.id):String(d.id);
+      traces.push({type:d.sourceType,id:d.id,metric:d.metric,color,
+        dash:meta?.dash||'solid',name:pname+(meta?' / '+meta.label:'')});
+    }
+  }
+  return traces;
+}
+
+function _selTitle(items){
+  const labels=[...new Set(items.map(it=>{
+    const d=it.dragData,meta=d.sourceType==='device'?DMET[d.metric]:PMET[d.metric];
+    return meta?meta.label:d.metric;
+  }))];
+  return labels.join(' + ');
+}
+function _selUnit(items){
+  const units=[...new Set(items.map(it=>{
+    const d=it.dragData,meta=d.sourceType==='device'?DMET[d.metric]:PMET[d.metric];
+    return meta?meta.unit:'';
+  }).filter(Boolean))];
+  return units.join('/');
+}
+
+function buildSidebar(){
+  const sb=document.getElementById('sidebar-content');sb.innerHTML='';
+  const devIds=adapter.devIds(),pids=adapter.pids();
+  _selected=[];
+  sb.addEventListener('click',e=>{if(!e.target.closest('.tree-item'))_clearSel();});
+
+  function mkItem(label,dot,dragData){
+    const el=document.createElement('div');el.className='tree-item';el.draggable=true;
+    el._dragData=dragData;
+    el.innerHTML='<span class="dot" style="background:'+dot+'"></span>'+label;
+    el.addEventListener('click',e=>{e.stopPropagation();_toggleSel(el,dragData,e.ctrlKey||e.metaKey,e.shiftKey);});
+    el.addEventListener('dblclick',e=>{
+      e.stopPropagation();
+      const items=_selected.length>1?_selected:[{el,dragData}];
+      const separate=(document.getElementById('separate-charts-toggle')||{}).checked!==false;
+      if(separate&&items.length>1){
+        const payload=items.map(it=>it.dragData);
+        let i=0;
+        function createNext(){
+          if(i<payload.length){
+            _dropSingle(payload[i],null);
+            i++;
+            requestAnimationFrame(createNext);
+          }
+        }
+        requestAnimationFrame(createNext);
+      }else if(separate&&items.length===1){
+        _dropSingle(items[0].dragData,null);
+      }else{
+        const traces=_resolveTraces(items);
+        if(traces.length){
+          const fakeItems=items.map(it=>({dragData:it.dragData||it}));
+          createPanel(_selTitle(fakeItems),_selUnit(fakeItems),traces);
+        }
+      }
+      _clearSel();
+    });
+    el.addEventListener('dragstart',e=>{
+      if(!el.classList.contains('selected')){_clearSel();el.classList.add('selected');_selected.push({el,dragData});}
+      const payload=_selected.map(s=>s.dragData);
+      e.dataTransfer.setData('text/plain',JSON.stringify({dragType:'multi',items:payload}));
+      _selected.forEach(s=>s.el.classList.add('dragging'));
+      const badge=document.createElement('div');badge.className='sel-badge';badge.id='_drag-badge';
+      badge.textContent=_selected.length;document.body.appendChild(badge);
+      const mv=ev=>{badge.style.left=ev.clientX+'px';badge.style.top=ev.clientY+'px';};
+      document.addEventListener('dragover',mv);
+      el._cleanDrag=()=>{document.removeEventListener('dragover',mv);badge.remove();};
+    });
+    el.addEventListener('dragend',()=>{
+      _selected.forEach(s=>s.el.classList.remove('dragging'));
+      if(el._cleanDrag){el._cleanDrag();el._cleanDrag=null;}
+    });
+    return el;
+  }
+
+  function mkGroup(label,dotColor,startOpen){
+    const grp=document.createElement('div');grp.className='tree-group';
+    const tog=document.createElement('div');tog.className='tree-toggle'+(startOpen?' open':'');
+    tog.innerHTML='<span class="arrow">&#9654;</span>'
+      +(dotColor?'<span class="tg-dot" style="background:'+dotColor+'"></span>':'')
+      +'<span class="tg-label">'+label+'</span>';
+    const kids=document.createElement('div');kids.className='tree-children';
+    tog.addEventListener('click',()=>tog.classList.toggle('open'));
+    grp.appendChild(tog);grp.appendChild(kids);
+    return{grp,kids,tog};
+  }
+
+  // ── Devices ──
+  if(devIds.length){
+    const h=document.createElement('h3');h.textContent='Devices';sb.appendChild(h);
+
+    const all=mkGroup('All Devices (combined)','var(--accent)',true);
+    for(const[k,m]of Object.entries(DMET)){
+      if(!devIds.some(d=>adapter.hasD(d,k)))continue;
+      all.kids.appendChild(mkItem(m.label+(m.unit?' ('+m.unit+')':''),'var(--accent)',
+        {dragType:'metric',sourceType:'device',metric:k}));
+    }
+    sb.appendChild(all.grp);
+
+    for(const id of devIds){
+      const dg=mkGroup(id,dColor(id),false);
+      for(const[k,m]of Object.entries(DMET)){
+        if(!adapter.hasD(id,k))continue;
+        dg.kids.appendChild(mkItem(m.label+(m.unit?' ('+m.unit+')':''),dColor(id),
+          {dragType:'single',sourceType:'device',id,metric:k}));
+      }
+      sb.appendChild(dg.grp);
+    }
+  }
+
+  // ── Processes ──
+  if(pids.length){
+    const h=document.createElement('h3');h.textContent='Processes';sb.appendChild(h);
+
+    const all=mkGroup('All Processes (combined)','var(--green)',false);
+    for(const[k,m]of Object.entries(PMET)){
+      if(!pids.some(p=>adapter.hasP(p,k)))continue;
+      all.kids.appendChild(mkItem(m.label+(m.unit?' ('+m.unit+')':''),'var(--green)',
+        {dragType:'metric',sourceType:'process',metric:k}));
+    }
+    sb.appendChild(all.grp);
+
+    for(const pid of pids){
+      const name=adapter.pName(pid);
+      const pg=mkGroup('PID '+pid+(name?' ('+name+')':''),pColor(pid),false);
+      pg.tog.title=adapter.pCmd(pid);
+      for(const[k,m]of Object.entries(PMET)){
+        if(!adapter.hasP(pid,k))continue;
+        pg.kids.appendChild(mkItem(m.label+(m.unit?' ('+m.unit+')':''),pColor(pid),
+          {dragType:'single',sourceType:'process',id:pid,metric:k}));
+      }
+      sb.appendChild(pg.grp);
+    }
+  }
+}
+
+// ── Canvas drop (new panel) ─────────────────────────────────────────────
+function initCanvasDrop(){
+  const c=document.getElementById('canvas');
+  c.addEventListener('dragover',e=>e.preventDefault());
+  c.addEventListener('drop',e=>{
+    if(e.target.closest('.grid-stack-item-content'))return;
+    e.preventDefault();
+    try{handleDrop(JSON.parse(e.dataTransfer.getData('text/plain')),null);}catch(_){}
+  });
+}
+
+// ── Auto-populate ───────────────────────────────────────────────────────
+const DG=[
+  {t:'Temperature',u:'°C',m:['temperature']},
+  {t:'Power',u:'W',m:['power','input_power_w']},
+  {t:'Voltage',u:'V',m:['voltage_v']},
+  {t:'Current',u:'A',m:['current_a']},
+  {t:'Clock Frequency',u:'MHz',m:['aiclk_mhz']},
+  {t:'Fan Speed',u:'RPM',m:['fan_speed_rpm']},
+  {t:'Device Memory',u:'MiB',m:['used_dram_mib','used_trace_mib','used_l1_mib','used_l1_small_mib','used_cb_mib']},
+];
+const PG=[
+  {t:'Process CPU',u:'%',m:['cpu_percent']},
+  {t:'Process Host Mem',u:'MiB',m:['vm_rss_mib','vm_virt_mib']},
+  {t:'Process Dev Mem',u:'MiB',m:['dram_mib','l1_mib','l1_small_mib','trace_mib','cb_mib']},
+  {t:'Process Threads',u:'',m:['num_threads']},
+];
+
+function autoPopulate(){
+  const devIds=adapter.devIds(),pids=adapter.pids(),multi=devIds.length>1;
+  function go(groups,srcType,ids,colorFn,nameFn){
+    for(const g of groups){
+      const traces=[];
+      for(const metric of g.m){
+        const meta=srcType==='device'?DMET[metric]:PMET[metric];
+        for(const id of ids){
+          const has=srcType==='device'?adapter.hasD(id,metric):adapter.hasP(id,metric);
+          if(!has)continue;
+          const nm=ids.length>1?(g.m.length>1?nameFn(id)+' / '+meta.label:nameFn(id)):meta.label;
+          traces.push({type:srcType,id,metric,color:colorFn(id),dash:meta.dash||'solid',name:nm});
+        }
+      }
+      if(traces.length)createPanel(g.t,g.u,traces);
+    }
+  }
+  go(DG,'device',devIds,dColor,id=>id);
+  go(PG,'process',pids,pColor,pid=>adapter.pName(pid));
+}
+
+// ── Meta ────────────────────────────────────────────────────────────────
+function renderMeta(){
+  const el=document.getElementById('meta-info');
+  if(TT_DATA&&TT_DATA.meta){
+    const m=TT_DATA.meta;
+    el.innerHTML=[
+      m.hostname?'Host: <b>'+m.hostname+'</b>':'',
+      m.start_time?'Started: <b>'+m.start_time+'</b>':'',
+      'Samples: <b>'+(TT_DATA.timestamps||[]).length+'</b>',
+      m.duration?'Duration: <b>'+m.duration+'s</b>':'',
+      'Devices: <b>'+Object.keys(TT_DATA.devices||{}).length+'</b>',
+      'Processes: <b>'+Object.keys(TT_DATA.processes||{}).length+'</b>',
+    ].filter(Boolean).map(s=>'<span>'+s+'</span>').join('');
+  }else if(TT_LIVE){
+    document.getElementById('live-dot').style.display='block';
+    el.innerHTML='<span>Live: <b>'+TT_LIVE.url+'</b></span><span>Interval: <b>'+TT_LIVE.interval+'ms</b></span>';
+  }
+}
+
+// ── Init ────────────────────────────────────────────────────────────────
+function init(){
+  grid=GridStack.init({
+    column:12, cellHeight:70, margin:4, animate:true,
+    float:false, removable:false,
+    handle:'.panel-hdr',
+    resizable:{handles:'e,se,s,sw,w'},
+    draggable:{handle:'.panel-hdr'},
+  },'#grid');
+
+  function reRenderAll(){
+    requestAnimationFrame(()=>{
+      for(const id of Object.keys(panels))renderChart(parseInt(id));
+    });
+  }
+  grid.on('resizestop',reRenderAll);
+  grid.on('dragstop',reRenderAll);
+  grid.on('change',reRenderAll);
+
+  renderMeta();
+  initCanvasDrop();
+
+  if(TT_DATA){
+    adapter=new OfflineAdapter(TT_DATA);
+  }else if(TT_LIVE){
+    adapter=new LiveAdapter(TT_LIVE);
+    adapter.onUpdate(()=>{
+      buildSidebar();
+      for(const id of Object.keys(panels))renderChart(parseInt(id));
+      renderMeta();
+    });
+    adapter.start();
+  }else{
+    document.getElementById('empty-hint').innerHTML='No data. Use: <code>tt-mgmt plot recording.jsonl</code>';
+    return;
+  }
+
+  buildSidebar();
+
+  window.addEventListener('resize',()=>{
+    clearTimeout(window._rt);
+    window._rt=setTimeout(()=>{
+      for(const id of Object.keys(panels))renderChart(parseInt(id));
+    },200);
+  });
+}
+
+document.addEventListener('DOMContentLoaded',init);
+</script>
+</body>
+</html>

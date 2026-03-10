@@ -1,0 +1,14 @@
+[Unit]
+Description=Tenstorrent Device Management Daemon
+Documentation=https://github.com/tenstorrent/tt-mgmt
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/tt-mgmtd --backend=auto
+RuntimeDirectory=tt-mgmt
+Type=exec
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
