@@ -9,6 +9,7 @@
 #include <sstream>
 #include <cstdio>
 #include <algorithm>
+#include <set>
 #include <unordered_map>
 
 #include "umd/device/pcie/pci_device.hpp"
@@ -105,19 +106,28 @@ void UmdDiscoveryProvider::initialize() {
 
     std::cerr << "[tt_mgmt] Starting multi-architecture device discovery..." << std::endl;
 
-    auto architectures = TopologyDiscovery::find_architectures(IODeviceType::PCIe);
+    // Enumerate all present architectures from PCIe device list
+    auto all_pci = PCIDevice::enumerate_devices_info();
+    std::set<tt::ARCH> detected_archs;
+    for (auto& [n, info] : all_pci) {
+        if (info.get_arch() != tt::ARCH::Invalid) {
+            detected_archs.insert(info.get_arch());
+        }
+    }
 
-    for (tt::ARCH arch : architectures) {
+    for (tt::ARCH arch : detected_archs) {
         ArchCluster cluster;
         cluster.arch = arch;
-        try {
-            TopologyDiscoveryOptions options;
-            options.architecture = arch;
-            options.no_remote_discovery = false;
-            options.no_eth_firmware_strictness = true;
-            options.no_wait_for_eth_training = true;
-            options.power_aware = true;
+        TopologyDiscoveryOptions options;
+        options.preferred_arch = arch;
+        options.discover_remote_devices = true;
+        options.wait_on_ethernet_link_training = false;
+        options.low_power = true;
+        options.cmfw_mismatch_action = TopologyDiscoveryOptions::Action::IGNORE;
+        options.eth_fw_mismatch_action = TopologyDiscoveryOptions::Action::IGNORE;
+        options.eth_fw_heartbeat_failure = TopologyDiscoveryOptions::Action::IGNORE;
 
+        try {
             auto [descriptor, devices] = TopologyDiscovery::discover(options);
             cluster.descriptor = std::move(descriptor);
             cluster.devices = std::move(devices);

@@ -124,8 +124,8 @@ bool UmdTelemetryProvider::update(DeviceInfo& dev) {
             dev.telemetry.arcclk_mhz = telem_reader->read_entry(TelemetryTag::ARCCLK);
         }
 
-        if (telem_reader->is_entry_available(TelemetryTag::DDR_SPEED)) {
-            dev.telemetry.ddr_speed_mhz = telem_reader->read_entry(TelemetryTag::DDR_SPEED);
+        if (telem_reader->is_entry_available(TelemetryTag::GDDR_SPEED)) {
+            dev.telemetry.ddr_speed_mhz = telem_reader->read_entry(TelemetryTag::GDDR_SPEED);
         }
 
         // FAN_RPM (tag 41): BH firmware. WH uses FAN_SPEED (tag 31) with tach period.
@@ -159,23 +159,23 @@ bool UmdTelemetryProvider::update(DeviceInfo& dev) {
         }
 
         if (cache->arch == tt::ARCH::BLACKHOLE) {
-            if (telem_reader->is_entry_available(TelemetryTag::INPUT_POWER)) {
-                dev.telemetry.input_power_w = telem_reader->read_entry(TelemetryTag::INPUT_POWER);
+            if (telem_reader->is_entry_available(TelemetryTag::TDP)) {
+                dev.telemetry.input_power_w = telem_reader->read_entry(TelemetryTag::TDP);
             }
             if (telem_reader->is_entry_available(TelemetryTag::MAX_GDDR_TEMP)) {
                 dev.telemetry.max_gddr_temp = telem_reader->read_entry(TelemetryTag::MAX_GDDR_TEMP);
             }
-            if (telem_reader->is_entry_available(TelemetryTag::GDDR01_TEMP)) {
-                dev.telemetry.gddr01_temp = telem_reader->read_entry(TelemetryTag::GDDR01_TEMP);
+            if (telem_reader->is_entry_available(TelemetryTag::GDDR_0_1_TEMP)) {
+                dev.telemetry.gddr01_temp = telem_reader->read_entry(TelemetryTag::GDDR_0_1_TEMP);
             }
-            if (telem_reader->is_entry_available(TelemetryTag::GDDR23_TEMP)) {
-                dev.telemetry.gddr23_temp = telem_reader->read_entry(TelemetryTag::GDDR23_TEMP);
+            if (telem_reader->is_entry_available(TelemetryTag::GDDR_2_3_TEMP)) {
+                dev.telemetry.gddr23_temp = telem_reader->read_entry(TelemetryTag::GDDR_2_3_TEMP);
             }
-            if (telem_reader->is_entry_available(TelemetryTag::GDDR45_TEMP)) {
-                dev.telemetry.gddr45_temp = telem_reader->read_entry(TelemetryTag::GDDR45_TEMP);
+            if (telem_reader->is_entry_available(TelemetryTag::GDDR_4_5_TEMP)) {
+                dev.telemetry.gddr45_temp = telem_reader->read_entry(TelemetryTag::GDDR_4_5_TEMP);
             }
-            if (telem_reader->is_entry_available(TelemetryTag::GDDR67_TEMP)) {
-                dev.telemetry.gddr67_temp = telem_reader->read_entry(TelemetryTag::GDDR67_TEMP);
+            if (telem_reader->is_entry_available(TelemetryTag::GDDR_6_7_TEMP)) {
+                dev.telemetry.gddr67_temp = telem_reader->read_entry(TelemetryTag::GDDR_6_7_TEMP);
             }
         }
 

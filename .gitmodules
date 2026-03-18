@@ -1,4 +1,4 @@
 [submodule "third_party/tt-umd"]
 	path = third_party/tt-umd
 	url = https://github.com/aperezvicente-TT/tt-umd.git
-	branch = tt-mgmt-v0.1
+	branch = tt-mgmt-umd-v1.0
