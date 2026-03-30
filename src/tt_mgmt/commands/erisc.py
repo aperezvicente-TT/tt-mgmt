@@ -346,9 +346,9 @@ _DIAG_LABELS = {
     10: "cdr_lock_time",
     11: "serdes_postcode",
     12: "lcpll_fail_cnt",
-    13: "ANLT_status",
-    14: "AN_time / eth_ctrl_init result (post-serdes)",
-    15: "LT_time / macpcs_init result (post-serdes)",
+    13: "AN_STAT[7:0]|ANLT_STATUS[15:8]|LP_REG1[31:16] (bit6=page_rx)",
+    14: "LP_ADV_REG2[15:0]|LP_ADV_REG3[31:16]",
+    15: "AN_time_ms[15:0]|LT_time_ms[31:16]",
 }
 
 
