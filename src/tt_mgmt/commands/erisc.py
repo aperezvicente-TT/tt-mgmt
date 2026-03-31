@@ -219,13 +219,42 @@ def _read_boot_results(noc_x, noc_y, chip_id=0, arch=None):
 
 
 def _parse_noc_coord(location: str):
-    """Parse 'X-Y' or 'X,Y' into (noc_x, noc_y)."""
+    """Parse 'X-Y', 'X,Y', or 'ethN' into (noc_x, noc_y).
+
+    ethN uses the index from tt-mgmt erisc list (sorted, harvesting-aware).
+    """
+    m = re.match(r"^eth(\d+)$", location, re.IGNORECASE)
+    if m:
+        idx = int(m.group(1))
+        cores = _get_eth_cores()
+        if not cores:
+            raise click.BadParameter("No ETH cores found on device.")
+        if idx >= len(cores):
+            raise click.BadParameter(
+                f"eth{idx} out of range (device has eth0-eth{len(cores)-1}).")
+        return cores[idx]
+
     m = re.match(r"^(\d+)[-,](\d+)$", location)
     if not m:
         raise click.BadParameter(
-            f"'{location}' is not a valid NOC coordinate. Use X-Y format (e.g. 4-1)."
+            f"'{location}' is not valid. Use X-Y (e.g. 4-1) or ethN (e.g. eth0)."
         )
     return int(m.group(1)), int(m.group(2))
+
+
+def _resolve_locations(locations, all_cores=False):
+    """Resolve location specs into list of (noc_x, noc_y).
+
+    Accepts multiple 'X-Y', 'ethN' args, or --all for every ETH core.
+    """
+    if all_cores:
+        cores = _get_eth_cores()
+        if not cores:
+            raise click.ClickException("No ETH cores found on device.")
+        return cores
+    if not locations:
+        raise click.UsageError("Provide at least one location (X-Y or ethN) or use --all.")
+    return [_parse_noc_coord(loc) for loc in locations]
 
 
 def _print_status(status):
@@ -265,19 +294,21 @@ def erisc():
 
 
 @erisc.command()
-@click.argument("location")
+@click.argument("locations", nargs=-1)
+@click.option("--all", "-a", "all_cores", is_flag=True, help="All ETH cores.")
 @click.option("--watch", "-w", is_flag=False, flag_value=1.0, default=None, type=float,
               help="Watch mode: refresh every N seconds (default 1).")
-def peek(location, watch):
-    """Read ERISC boot_results at NOC coordinate.
+def peek(locations, all_cores, watch):
+    """Read ERISC boot_results at NOC coordinate(s).
 
     \b
     Examples:
       tt-mgmt erisc peek 4-1
+      tt-mgmt erisc peek eth0 eth1 eth5
+      tt-mgmt erisc peek --all
       tt-mgmt erisc peek 4-1 --watch
-      tt-mgmt erisc peek 4-1 -w 0.5
     """
-    noc_x, noc_y = _parse_noc_coord(location)
+    coords = _resolve_locations(locations, all_cores)
 
     if watch is not None:
         import sys
@@ -285,7 +316,8 @@ def peek(location, watch):
         try:
             while True:
                 sys.stdout.write("\033[H")
-                _print_status(_read_boot_results(noc_x, noc_y))
+                for noc_x, noc_y in coords:
+                    _print_status(_read_boot_results(noc_x, noc_y))
                 sys.stdout.write("\033[J")
                 sys.stdout.flush()
                 time.sleep(watch)
@@ -295,7 +327,8 @@ def peek(location, watch):
             sys.stdout.write("\033[?25h")
             sys.stdout.flush()
     else:
-        _print_status(_read_boot_results(noc_x, noc_y))
+        for noc_x, noc_y in coords:
+            _print_status(_read_boot_results(noc_x, noc_y))
 
 
 @erisc.command("read")
@@ -308,7 +341,7 @@ def read_cmd(location, addr, size):
     \b
     Examples:
       tt-mgmt erisc read 4-1 0x7CC00
-      tt-mgmt erisc read 4-1 0x7CC00 --size 128
+      tt-mgmt erisc read eth0 0x7CC00 --size 128
     """
     noc_x, noc_y = _parse_noc_coord(location)
     address = int(addr, 0)
@@ -353,11 +386,12 @@ _DIAG_LABELS = {
 
 
 @erisc.command()
-@click.argument("location")
+@click.argument("locations", nargs=-1)
+@click.option("--all", "-a", "all_cores", is_flag=True, help="All ETH cores.")
 @click.option("--count", "-n", default=16, type=int,
-              help="Number of scratchpad entries to read (default 18).")
-def diag(location, count):
-    """Read SerDes diagnostic scratchpad from an ERISC core.
+              help="Number of scratchpad entries to read (default 16).")
+def diag(locations, all_cores, count):
+    """Read SerDes diagnostic scratchpad from ERISC core(s).
 
     \b
     Reads the debug_buf scratchpad registers written by dump_diag_regs()
@@ -366,22 +400,27 @@ def diag(location, count):
     \b
     Examples:
       tt-mgmt erisc diag 3-1
+      tt-mgmt erisc diag eth0 eth1
+      tt-mgmt erisc diag --all
       tt-mgmt erisc diag 13-1 -n 20
     """
-    noc_x, noc_y = _parse_noc_coord(location)
+    coords = _resolve_locations(locations, all_cores)
     device = _get_umd_device()
     if device is None:
         raise click.ClickException("No device found")
 
-    base = _BH_DIAG_SCRATCHPAD_BASE
-    data = device.noc_read(noc_x, noc_y, base, count * 4)
+    for idx, (noc_x, noc_y) in enumerate(coords):
+        if idx > 0:
+            click.echo()
+        base = _BH_DIAG_SCRATCHPAD_BASE
+        data = device.noc_read(noc_x, noc_y, base, count * 4)
 
-    click.echo(f"SerDes diagnostic scratchpad ({noc_x},{noc_y})  [{count} entries from 0x{base:05X}]")
-    click.echo("-" * 64)
-    for i in range(count):
-        val = struct.unpack_from("<I", data, i * 4)[0]
-        label = _DIAG_LABELS.get(i, "")
-        click.echo(f"  [{i:2d}] 0x{base + i*4:05X}: 0x{val:08X}  {label}")
+        click.echo(f"SerDes diagnostic scratchpad ({noc_x},{noc_y})  [{count} entries from 0x{base:05X}]")
+        click.echo("-" * 64)
+        for i in range(count):
+            val = struct.unpack_from("<I", data, i * 4)[0]
+            label = _DIAG_LABELS.get(i, "")
+            click.echo(f"  [{i:2d}] 0x{base + i*4:05X}: 0x{val:08X}  {label}")
 
 
 # ---------------------------------------------------------------------------
@@ -458,28 +497,32 @@ def _load_erisc_fw(device, noc_x, noc_y, elf_path, verify=True, run=True):
 
 @erisc.command("load")
 @click.argument("elf_path", type=click.Path(exists=True))
-@click.argument("location")
+@click.argument("locations", nargs=-1)
+@click.option("--all", "-a", "all_cores", is_flag=True, help="Load onto all ETH cores.")
 @click.option("--no-run", is_flag=True, help="Load but don't start (keep core in reset).")
 @click.option("--no-verify", is_flag=True, help="Skip read-back verification.")
-def load_cmd(elf_path, location, no_run, no_verify):
-    """Load ERISC firmware ELF onto an ETH core.
+def load_cmd(elf_path, locations, all_cores, no_run, no_verify):
+    """Load ERISC firmware ELF onto ETH core(s).
 
     \b
     Examples:
-      tt-mgmt erisc load ~/bh-erisc/out/erisc_hello.elf 4-1
-      tt-mgmt erisc load ~/bh-erisc/out/eth_init.elf 4-1 --no-run
+      tt-mgmt erisc load fw.elf 4-1
+      tt-mgmt erisc load fw.elf 3-1 13-1 10-1 11-1
+      tt-mgmt erisc load fw.elf eth0 eth1
+      tt-mgmt erisc load fw.elf --all
     """
-    noc_x, noc_y = _parse_noc_coord(location)
+    coords = _resolve_locations(locations, all_cores)
     device = _get_umd_device()
     if device is None:
         raise click.ClickException("No device found")
 
-    click.echo(f"Loading {elf_path} onto ({noc_x},{noc_y})...")
-    _load_erisc_fw(device, noc_x, noc_y, elf_path,
-                   verify=not no_verify, run=not no_run)
+    for noc_x, noc_y in coords:
+        click.echo(f"Loading {elf_path} onto ({noc_x},{noc_y})...")
+        _load_erisc_fw(device, noc_x, noc_y, elf_path,
+                       verify=not no_verify, run=not no_run)
 
     if not no_run:
-        click.echo(f"\nTo check status: tt-mgmt erisc peek {noc_x}-{noc_y}")
+        click.echo(f"\nTo check status: tt-mgmt erisc peek --all")
 
 
 # ---------------------------------------------------------------------------
