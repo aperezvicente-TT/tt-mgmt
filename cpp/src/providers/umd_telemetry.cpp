@@ -184,8 +184,8 @@ bool UmdTelemetryProvider::update(DeviceInfo& dev) {
         }
 
         if (cache->arch == tt::ARCH::BLACKHOLE) {
-            if (telem_reader->is_entry_available(TelemetryTag::TDP)) {
-                dev.telemetry.input_power_w = telem_reader->read_entry(TelemetryTag::TDP);
+            if (telem_reader->is_entry_available(TelemetryTag::INPUT_POWER)) {
+                dev.telemetry.input_power_w = telem_reader->read_entry(TelemetryTag::INPUT_POWER);
             }
             if (telem_reader->is_entry_available(TelemetryTag::MAX_GDDR_TEMP)) {
                 dev.telemetry.max_gddr_temp = telem_reader->read_entry(TelemetryTag::MAX_GDDR_TEMP);

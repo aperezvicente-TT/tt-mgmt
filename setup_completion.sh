@@ -17,17 +17,17 @@ case "$CURRENT_SHELL" in
         
         # Check if already added
         if grep -q "_TT_MGMT_COMPLETE" "$RC_FILE" 2>/dev/null; then
-            echo "✓ Completion already configured in $RC_FILE"
+            echo "[OK] Completion already configured in $RC_FILE"
         else
             echo "" >> "$RC_FILE"
             echo "# tt-mgmt shell completion" >> "$RC_FILE"
             echo "$COMPLETION_LINE" >> "$RC_FILE"
-            echo "✓ Added completion to $RC_FILE"
+            echo "[OK] Added completion to $RC_FILE"
         fi
         
         # Enable for current session (only works if script is sourced)
         eval "$COMPLETION_LINE"
-        echo "✓ Completion enabled for current session!"
+        echo "[OK] Completion enabled for current session!"
         echo ""
         echo "Try it: tt-mgmt <TAB><TAB>"
         ;;
@@ -39,12 +39,12 @@ case "$CURRENT_SHELL" in
         
         # Check if already added
         if grep -q "_TT_MGMT_COMPLETE" "$RC_FILE" 2>/dev/null; then
-            echo "✓ Completion already configured in $RC_FILE"
+            echo "[OK] Completion already configured in $RC_FILE"
         else
             echo "" >> "$RC_FILE"
             echo "# tt-mgmt shell completion" >> "$RC_FILE"
             echo "$COMPLETION_LINE" >> "$RC_FILE"
-            echo "✓ Added completion to $RC_FILE"
+            echo "[OK] Added completion to $RC_FILE"
         fi
         
         echo ""
@@ -61,12 +61,12 @@ case "$CURRENT_SHELL" in
         
         # Check if already added
         if grep -q "_TT_MGMT_COMPLETE" "$RC_FILE" 2>/dev/null; then
-            echo "✓ Completion already configured in $RC_FILE"
+            echo "[OK] Completion already configured in $RC_FILE"
         else
             echo "" >> "$RC_FILE"
             echo "# tt-mgmt shell completion" >> "$RC_FILE"
             echo "$COMPLETION_LINE" >> "$RC_FILE"
-            echo "✓ Added completion to $RC_FILE"
+            echo "[OK] Added completion to $RC_FILE"
         fi
         
         echo ""

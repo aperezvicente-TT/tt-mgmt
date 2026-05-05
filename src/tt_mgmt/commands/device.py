@@ -66,7 +66,7 @@ def list(ctx, format, show_remote):
             table = Table(title="Tenstorrent Devices", box=ui.get_box())
             table.add_column("Logical ID", style="bright_blue")
             table.add_column("Board", style="green")
-            table.add_column("Display", style="dim")
+            table.add_column("ASIC ID", style="dim")
             table.add_column("Status", style="magenta")
             table.add_column("Temperature", style="yellow")
             table.add_column("Power", style="red")

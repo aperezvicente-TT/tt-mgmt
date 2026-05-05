@@ -2,48 +2,45 @@
 # One-step install and enable completion
 # USAGE: source ./install_and_enable.sh
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🚀 Installing tt-mgmt..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "================================================="
+echo "Installing tt-mgmt..."
+echo "================================================="
 echo ""
 
-# Install
 pip install -e . -q
 
 if [ $? -eq 0 ]; then
-    echo "✓ tt-mgmt installed successfully!"
+    echo "tt-mgmt installed successfully."
 else
-    echo "✗ Installation failed"
+    echo "Installation failed."
     return 1
 fi
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "⌨️  Enabling tab completion..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "================================================="
+echo "Enabling tab completion..."
+echo "================================================="
 echo ""
 
-# Enable for current session
 eval "$(_TT_MGMT_COMPLETE=bash_source tt-mgmt)"
-echo "✓ Tab completion enabled for current session!"
+echo "Tab completion enabled for current session."
 
-# Add to ~/.bashrc if not already there
 RC_FILE="$HOME/.bashrc"
 if grep -q "_TT_MGMT_COMPLETE" "$RC_FILE" 2>/dev/null; then
-    echo "✓ Already configured in $RC_FILE"
+    echo "Already configured in $RC_FILE."
 else
     echo "" >> "$RC_FILE"
     echo "# tt-mgmt shell completion" >> "$RC_FILE"
     echo 'eval "$(_TT_MGMT_COMPLETE=bash_source tt-mgmt)"' >> "$RC_FILE"
-    echo "✓ Added to $RC_FILE (for future sessions)"
+    echo "Added to $RC_FILE (for future sessions)."
 fi
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✨ All done! Try it now:"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "================================================="
+echo "Done. Try it now:"
+echo "================================================="
 echo ""
 echo "  tt-mgmt <TAB><TAB>"
 echo "  tt-mgmt device <TAB><TAB>"
-echo "  tt-mgmt system <TAB><TAB>"
+echo "  tt-mgmt smi <TAB><TAB>"
 echo ""

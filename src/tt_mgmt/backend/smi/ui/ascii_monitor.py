@@ -29,10 +29,11 @@ _OVERVIEW_COLS = (
     ("KMD",      3),
     ("LID",      3),
     ("BDF",     12),   # 0000:01:00.0
-    ("Fan",      4),
-    ("Temp",     5),
-    ("Pwr/Cap", 11),
-    ("AICLK",    8),
+    ("Fan",       4),
+    ("Temp",      5),
+    ("TDP",       8),
+    ("In Pwr",    6),
+    ("AICLK",     8),
     ("DRAM",    17),
     ("L1-Util",  7),
     ("Status",  10),
@@ -187,7 +188,7 @@ def _tab_overview(devices) -> List[str]:
             status = d.telemetry_status or "?"
             temp = _fmt(d.temperature, ".0f")
             power = _fmt(d.power, ".0f")
-            plim = _fmt(d.tdp_limit_w, ".0f")
+            tdp_in = getattr(d, "input_power_w", 0) or 0
             aiclk = _fmt(d.aiclk_mhz, ".0f")
             pct = d.fan_speed_pct
             fan_cell = f"{pct}%" if isinstance(pct, int) and pct > 0 else "-"
@@ -202,7 +203,8 @@ def _tab_overview(devices) -> List[str]:
                 _bdf(d),
                 fan_cell,
                 f"{temp}C" if temp != "-" else "-",
-                f"{power:>3}W /{plim:>3}W",
+                f"{power}W" if power != "-" else "-",
+                f"{tdp_in}W" if tdp_in > 0 else "-",
                 f"{aiclk}MHz" if aiclk != "-" else "-",
                 f"{dram_used:>5}/{dram_tot:>5} MiB",
                 f"{l1_pct:>5.1f}%",
@@ -214,50 +216,221 @@ def _tab_overview(devices) -> List[str]:
 
 # --- tab 2: telemetry detail ------------------------------------------------
 
-# Dev | ASIC | Board | VReg | VCORE | TDC | TDP | AICLK | AXICLK | ARCCLK | DDR | Fan RPM
-_TELEM_COLS = (
-    ("ASIC",    14),   # display_id + [L]/[R]
-    ("T-ASIC",   6),
-    ("T-Brd",    5),
-    ("T-VReg",   6),
-    ("VCORE",   6),
-    ("TDC",     6),
-    ("TDP",     6),
-    ("AICLK",   8),
-    ("AXICLK",  8),
-    ("ARCCLK",  8),
-    ("DDR",     8),
-    ("Fan RPM", 8),
+# TDP    = chip power (dev.power) — instantaneous ASIC TDP from firmware.
+# In Pwr = board input power (dev.input_power_w); "-" on archs/firmware that don't populate it.
+#
+# Wormhole and Blackhole expose different telemetry — render arch-specific
+# blocks so each shows only fields its firmware actually populates.
+
+_WH_TELEM_COLS = (
+    ("ASIC",      14),
+    ("T-ASIC",     6),
+    ("T-Brd",      6),
+    ("VCORE",      6),
+    ("TDC",        5),
+    ("TDP",        8),
+    ("In Pwr",     6),
+    ("AICLK",      8),
+    ("AXICLK",     8),
+    ("ARCCLK",     8),
+    ("DDR",        8),
+    ("Fan RPM",    8),
 )
-_TELEM_WIDTHS = tuple(w for _, w in _TELEM_COLS)
+_WH_TELEM_WIDTHS = tuple(w for _, w in _WH_TELEM_COLS)
+
+_BH_TELEM_COLS = (
+    ("ASIC",       14),
+    ("T-ASIC",      6),
+    ("VCORE",       6),
+    ("TDC",         5),
+    ("TDP",         8),
+    ("In Pwr",      6),
+    ("AICLK",       8),
+    ("AXICLK",      8),
+    ("ARCCLK",      8),
+    ("GDDR Gbps",   9),
+    ("Fan RPM",     8),
+)
+_BH_TELEM_WIDTHS = tuple(w for _, w in _BH_TELEM_COLS)
+
+# Used as fallback for unknown architectures.
+_TELEM_COLS = _WH_TELEM_COLS
+_TELEM_WIDTHS = _WH_TELEM_WIDTHS
+
+
+def _wh_telem_row(d) -> tuple:
+    asic = _fmt(d.temperature, ".0f")
+    board = _fmt(d.board_temperature, ".0f")
+    vcore_mv = d.voltage_mv or 0
+    tdc_a = d.current_ma or 0
+    tdp = getattr(d, "input_power_w", 0) or 0
+    return (
+        _asic(d),
+        f"{asic}C" if asic != "-" else "-",
+        f"{board}C" if board != "-" else "-",
+        f"{vcore_mv/1000.0:.2f}V" if vcore_mv > 0 else "-",
+        f"{tdc_a}A" if tdc_a > 0 else "-",
+        f"{_fmt(d.power, '.0f')}W" if d.power and d.power > 0 else "-",
+        f"{tdp}W" if tdp > 0 else "-",
+        f"{_fmt(d.aiclk_mhz, '.0f')}MHz",
+        f"{_fmt(d.axiclk_mhz, '.0f')}MHz",
+        f"{_fmt(d.arcclk_mhz, '.0f')}MHz",
+        f"{_fmt(d.ddr_speed_mhz, '.0f')}MHz",
+        _fmt(d.fan_speed_rpm, "d") if isinstance(d.fan_speed_rpm, int) else _fmt(d.fan_speed_rpm, ".0f"),
+    )
+
+
+def _bh_telem_row(d) -> tuple:
+    asic = _fmt(d.temperature, ".0f")
+    vcore_mv = d.voltage_mv or 0
+    tdc_a = d.current_ma or 0
+    tdp = getattr(d, "input_power_w", 0) or 0
+    ddr_gbps = (d.ddr_speed_mhz / 1000.0) if d.ddr_speed_mhz else 0.0
+    return (
+        _asic(d),
+        f"{asic}C" if asic != "-" else "-",
+        f"{vcore_mv}mV" if vcore_mv > 0 else "-",
+        f"{tdc_a}A" if tdc_a > 0 else "-",
+        f"{_fmt(d.power, '.0f')}W" if d.power and d.power > 0 else "-",
+        f"{tdp}W" if tdp > 0 else "-",
+        f"{_fmt(d.aiclk_mhz, '.0f')}" if d.aiclk_mhz else "-",
+        f"{_fmt(d.axiclk_mhz, '.0f')}" if d.axiclk_mhz else "-",
+        f"{_fmt(d.arcclk_mhz, '.0f')}" if d.arcclk_mhz else "-",
+        f"{ddr_gbps:.1f}" if ddr_gbps > 0 else "-",
+        _fmt(d.fan_speed_rpm, "d") if isinstance(d.fan_speed_rpm, int) else _fmt(d.fan_speed_rpm, ".0f"),
+    )
+
+
+def _telem_block(devices, cols, widths, row_fn, title: str | None) -> List[str]:
+    out: List[str] = []
+    if title:
+        width = _frame_width(widths)
+        out.append(_banner_sep(width))
+        out.append(_banner(title, width))
+    out.append(_sep(widths))
+    out.append(_row(tuple(label for label, _ in cols), widths))
+    out.append(_sep(widths, ch="="))
+    for d in devices:
+        out.append(_row(row_fn(d), widths))
+    out.append(_sep(widths))
+    return out
 
 
 def _tab_telemetry(devices) -> List[str]:
-    out = [_sep(_TELEM_WIDTHS)]
-    out.append(_row(tuple(label for label, _ in _TELEM_COLS), _TELEM_WIDTHS))
-    out.append(_sep(_TELEM_WIDTHS, ch="="))
+    wh_devs = [d for d in devices if "Wormhole" in (d.arch_name or "")]
+    bh_devs = [d for d in devices if "Blackhole" in (d.arch_name or "")]
+    other_devs = [d for d in devices if d not in wh_devs and d not in bh_devs]
+
+    mixed = bool(wh_devs) and bool(bh_devs)
+    out: List[str] = []
+
+    if wh_devs:
+        out += _telem_block(
+            wh_devs, _WH_TELEM_COLS, _WH_TELEM_WIDTHS, _wh_telem_row,
+            title="Wormhole Telemetry" if mixed else None,
+        )
+    if bh_devs:
+        if wh_devs:
+            out.append("")
+        out += _telem_block(
+            bh_devs, _BH_TELEM_COLS, _BH_TELEM_WIDTHS, _bh_telem_row,
+            title="Blackhole Telemetry" if mixed else None,
+        )
+    if other_devs:
+        if out:
+            out.append("")
+        # Fall back to WH layout for unknown architectures.
+        out += _telem_block(
+            other_devs, _WH_TELEM_COLS, _WH_TELEM_WIDTHS, _wh_telem_row, title=None,
+        )
+
+    if bh_devs:
+        out.append("")
+        out += _bh_gddr_block(bh_devs)
+
+    return out
+
+
+_BH_GDDR_COLS = (
+    ("ASIC",     14),
+    ("State",     7),
+    ("Max",       7),
+    ("0/1",       7),
+    ("2/3",       7),
+    ("4/5",       7),
+    ("6/7",       7),
+)
+_BH_GDDR_WIDTHS = tuple(w for _, w in _BH_GDDR_COLS)
+
+# Stale-temp detection: ARC stops polling when GDDR is in self-refresh, so
+# the same packed value persists. If the signature hasn't changed in this
+# many seconds, mark the device's GDDR readings as 'idle' (frozen).
+_GDDR_IDLE_THRESHOLD_SEC = 5.0
+_gddr_snapshot: dict = {}  # display_id -> ((sig_tuple), last_change_time)
+
+
+def _gddr_pair_max(packed: int) -> int:
+    """Max byte across the four packed temperatures in a GDDR pair register."""
+    if not packed:
+        return 0
+    return max(
+        (packed >> 0) & 0xFF,
+        (packed >> 8) & 0xFF,
+        (packed >> 16) & 0xFF,
+        (packed >> 24) & 0xFF,
+    )
+
+
+def _bh_gddr_block(devices) -> List[str]:
+    now = time.time()
+    activity: dict = {}
     for d in devices:
-        asic = _fmt(d.temperature, ".0f")
-        board = _fmt(d.board_temperature, ".0f")
-        vreg = _fmt(d.vreg_temperature, ".0f")
-        vcore_mv = d.voltage_mv or 0
-        # Note: field is named current_ma but firmware reports TDC in amps.
-        tdc_a = d.current_ma or 0
-        out.append(_row((
-            _asic(d),
-            f"{asic}C" if asic != "-" else "-",
-            f"{board}C" if board != "-" else "-",
-            f"{vreg}C" if vreg != "-" else "-",
-            f"{vcore_mv/1000.0:.2f}V" if vcore_mv > 0 else "-",
-            f"{tdc_a}A" if tdc_a > 0 else "-",
-            f"{_fmt(d.tdp_limit_w, '.0f')}W",
-            f"{_fmt(d.aiclk_mhz, '.0f')}MHz",
-            f"{_fmt(d.axiclk_mhz, '.0f')}MHz",
-            f"{_fmt(d.arcclk_mhz, '.0f')}MHz",
-            f"{_fmt(d.ddr_speed_mhz, '.0f')}MHz",
-            _fmt(d.fan_speed_rpm, "d") if isinstance(d.fan_speed_rpm, int) else _fmt(d.fan_speed_rpm, ".0f"),
-        ), _TELEM_WIDTHS))
-    out.append(_sep(_TELEM_WIDTHS))
+        key = d.display_id
+        sig = (
+            getattr(d, "gddr01_temp", 0) or 0,
+            getattr(d, "gddr23_temp", 0) or 0,
+            getattr(d, "gddr45_temp", 0) or 0,
+            getattr(d, "gddr67_temp", 0) or 0,
+        )
+        prev = _gddr_snapshot.get(key)
+        if prev is None or prev[0] != sig:
+            _gddr_snapshot[key] = (sig, now)
+            activity[key] = True
+        else:
+            activity[key] = (now - prev[1]) < _GDDR_IDLE_THRESHOLD_SEC
+
+    width = _frame_width(_BH_GDDR_WIDTHS)
+    out = [_banner_sep(width), _banner("Blackhole GDDR Temperatures", width), _sep(_BH_GDDR_WIDTHS)]
+    out.append(_row(tuple(label for label, _ in _BH_GDDR_COLS), _BH_GDDR_WIDTHS))
+    out.append(_sep(_BH_GDDR_WIDTHS, ch="="))
+    for _bid, _arch, btype, board_devs in _group_by_board(devices):
+        out.append(_banner(f"Board {_bid:016x}  ({btype})", width))
+        out.append(_sep(_BH_GDDR_WIDTHS))
+        for d in board_devs:
+            active = activity.get(d.display_id, True)
+            state = "active" if active else "idle"
+
+            def cell(packed: int) -> str:
+                if not packed:
+                    return "-"
+                t = _gddr_pair_max(packed)
+                return f"{t}C" if active else f"{t}C*"
+
+            max_t = getattr(d, "max_gddr_temp", 0) or 0
+            max_cell = (f"{max_t}C" if active else f"{max_t}C*") if max_t > 0 else "-"
+
+            out.append(_row((
+                _asic(d),
+                state,
+                max_cell,
+                cell(getattr(d, "gddr01_temp", 0) or 0),
+                cell(getattr(d, "gddr23_temp", 0) or 0),
+                cell(getattr(d, "gddr45_temp", 0) or 0),
+                cell(getattr(d, "gddr67_temp", 0) or 0),
+            ), _BH_GDDR_WIDTHS))
+    out.append(_sep(_BH_GDDR_WIDTHS))
+    out.append(_banner("  * = reading frozen (GDDR in self-refresh)", width))
+    out.append(_banner_sep(width))
     return out
 
 
