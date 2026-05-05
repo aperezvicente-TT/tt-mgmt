@@ -12,58 +12,15 @@ from rich.console import Console
 import click
 
 
-def build_completer():
-    """Build completion tree from registered commands."""
-    return NestedCompleter.from_nested_dict({
-        'device': {
-            'list': None,
-            'info': None,
-            'reset': None,
-            'monitor': None,
-        },
-        'system': {
-            'status': None,
-            'topology': None,
-            'version': None,
-        },
-        'memory': {
-            'stats': None,
-            'dump': None,
-            'clear': None,
-        },
-        'debug': {
-            'info': None,
-            'dump-regs': None,
-            'enable': None,
-            'disable': None,
-        },
-        'smi': {
-            'monitor': None,
-            'telemetry': None,
-            'memory': None,
-            'processes': None,
-            'cleanup': None,
-        },
-        'env': {
-            'list': None,
-            'show': None,
-            'set': None,
-            'unset': None,
-            'export': None,
-            'profile': None,
-        },
-        'fabric': {
-            'status': None,
-            'links': None,
-            'topology': None,
-            'cluster': None,
-            'placement': None,
-            'health': None,
-        },
-        'help': None,
-        'exit': None,
-        'quit': None,
-    })
+def build_completer(main_cli):
+    """Build completion tree by walking the Click command graph."""
+    def walk(cmd):
+        if isinstance(cmd, click.Group):
+            return {name: walk(sub) for name, sub in cmd.commands.items()}
+        return None
+    tree = walk(main_cli) or {}
+    tree.update({'help': None, 'exit': None, 'quit': None})
+    return NestedCompleter.from_nested_dict(tree)
 
 
 def run_interactive_mode(console: Console, main_cli, *, parent_ctx_obj: dict | None = None):
@@ -78,7 +35,7 @@ def run_interactive_mode(console: Console, main_cli, *, parent_ctx_obj: dict | N
     base_obj = dict(parent_ctx_obj) if parent_ctx_obj else {'console': console}
 
     session = PromptSession(
-        completer=build_completer(),
+        completer=build_completer(main_cli),
         history=InMemoryHistory(),
         auto_suggest=AutoSuggestFromHistory(),
         enable_history_search=True,
@@ -97,13 +54,12 @@ def run_interactive_mode(console: Console, main_cli, *, parent_ctx_obj: dict | N
 
             if cmd_line.strip().lower() == 'help':
                 console.print("\n[bold cyan]Commands:[/bold cyan]\n")
-                console.print("  [green]device[/green]   list, info, reset, monitor")
-                console.print("  [green]system[/green]   status, topology, version")
-                console.print("  [green]memory[/green]   stats, dump, clear")
-                console.print("  [green]debug[/green]    info, dump-regs, enable, disable")
-                console.print("  [green]smi[/green]      monitor, telemetry, memory, processes, cleanup")
-                console.print("  [green]env[/green]      list, show, set, unset, export, profile")
-                console.print("  [green]fabric[/green]   status, links, topology, cluster, placement, health")
+                for name, cmd in sorted(main_cli.commands.items()):
+                    if isinstance(cmd, click.Group):
+                        subs = ", ".join(sorted(cmd.commands.keys()))
+                    else:
+                        subs = ""
+                    console.print(f"  [green]{name}[/green]   {subs}")
                 console.print("\n  [dim]TAB to autocomplete  |  exit / Ctrl+D to quit[/dim]\n")
                 continue
 

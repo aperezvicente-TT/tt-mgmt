@@ -187,7 +187,7 @@ def _stats(values):
 def _render_terminal_summary(meta, samples, timestamps, device_series, process_series, console):
     """Print a rich-table summary to the terminal."""
     from rich.table import Table
-    from rich import box
+    from tt_mgmt import ui
 
     n = len(samples)
     if not n:
@@ -207,7 +207,7 @@ def _render_terminal_summary(meta, samples, timestamps, device_series, process_s
     console.print()
 
     # Device telemetry summary
-    table = Table(title="Device Telemetry Summary", box=box.ROUNDED, show_header=True, header_style="bold")
+    table = Table(title="Device Telemetry Summary", box=ui.get_box(), show_header=True, header_style="bold")
     table.add_column("Device", style="cyan")
     table.add_column("Metric")
     table.add_column("Min", justify="right")
@@ -265,7 +265,7 @@ def _render_terminal_summary(meta, samples, timestamps, device_series, process_s
                       "run: tt-mgmt plot run_<pid>.jsonl[/dim]")
 
     if process_series:
-        ptable = Table(title="Process Summary", box=box.ROUNDED, show_header=True, header_style="bold")
+        ptable = Table(title="Process Summary", box=ui.get_box(), show_header=True, header_style="bold")
         ptable.add_column("PID",          style="cyan")
         ptable.add_column("Name")
         ptable.add_column("CPU% avg",     justify="right")
@@ -462,8 +462,8 @@ def plot(ctx, recording, output, device, pid, terminal, no_open, live, daemon_ur
     """
     console = ctx.obj.get("console")
     if console is None:
-        from rich.console import Console
-        console = Console()
+        from tt_mgmt import ui
+        console = ui.get_console()
 
     # ── Live mode ─────────────────────────────────────────────────────────
     if live:

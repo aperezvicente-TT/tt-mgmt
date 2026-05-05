@@ -25,6 +25,13 @@ namespace tt_device_hal {
 
 namespace {
 
+// Approximate full-speed RPM for the stock fans on Tenstorrent boards.
+// The firmware does not expose a nominal-max, so we hardcode what the fan
+// physically tops out at. Used only to derive a fan_speed_pct display value
+// from fan_speed_rpm; the RPM reading itself is always authoritative.
+constexpr uint32_t WH_FAN_MAX_RPM = 4100;  // Wormhole N150/N300 tach ceiling
+constexpr uint32_t BH_FAN_MAX_RPM = 7000;  // Blackhole p100/p150, approximate
+
 // Mirrors tt::umd::RobustMutex::pthread_mutex_wrapper layout for read-only inspection.
 struct UmdMutexWrapper {
     pthread_mutex_t mutex;
@@ -83,6 +90,15 @@ bool UmdTelemetryProvider::update(DeviceInfo& dev) {
             double temp = fw_info->get_asic_temperature();
             if (temp >= -50.0 && temp <= 150.0) {
                 dev.telemetry.temperature = static_cast<float>(temp);
+            }
+
+            // Firmware versions don't change post-boot; only populate once.
+            if (dev.firmware.fw_bundle_ver.empty()) {
+                dev.firmware.fw_bundle_ver = fw_info->get_firmware_version().to_string();
+                if (auto v = fw_info->get_cm_fw_version())     dev.firmware.arc_fw_ver    = v->to_string();
+                if (auto v = fw_info->get_eth_fw_version_semver()) dev.firmware.eth_fw_ver = v->to_string();
+                if (auto v = fw_info->get_dm_app_fw_version()) dev.firmware.m3app_fw_ver  = v->to_string();
+                if (auto v = fw_info->get_tt_flash_version())  dev.firmware.ttflash_ver   = v->to_string();
             }
         }
 
@@ -146,6 +162,15 @@ bool UmdTelemetryProvider::update(DeviceInfo& dev) {
             dev.telemetry.fan_speed_rpm = (tach > 0) ? (3000000u / tach) : 0;
         }
 
+        // Derive fan_speed_pct from RPM against an approximate per-arch ceiling.
+        // Firmware does not report a nominal max, so this is an estimate.
+        if (dev.telemetry.fan_speed_rpm > 0) {
+            uint32_t max_rpm = (cache->arch == tt::ARCH::BLACKHOLE)
+                ? BH_FAN_MAX_RPM : WH_FAN_MAX_RPM;
+            uint32_t pct = dev.telemetry.fan_speed_rpm * 100u / max_rpm;
+            dev.telemetry.fan_speed_pct = pct > 100u ? 100u : pct;
+        }
+
         if (telem_reader->is_entry_available(TelemetryTag::TDP_LIMIT_MAX)) {
             dev.telemetry.tdp_limit_w = telem_reader->read_entry(TelemetryTag::TDP_LIMIT_MAX);
         }
@@ -181,7 +206,14 @@ bool UmdTelemetryProvider::update(DeviceInfo& dev) {
 
         dev.telemetry.available = true;
 
-        if (dev.pci_ordinal >= 0 && check_chip_in_use(dev.pci_ordinal)) {
+        // CHIP_IN_USE is a per-PCI-device UMD lock. Remotes don't have a
+        // PCI ordinal, so walk the ETH topology to find the MMIO parent
+        // and check its lock instead.
+        int lock_ordinal = dev.pci_ordinal;
+        if (lock_ordinal < 0 && cache->is_remote) {
+            lock_ordinal = discovery_->find_mmio_parent_ordinal(cache->chip_id);
+        }
+        if (lock_ordinal >= 0 && check_chip_in_use(lock_ordinal)) {
             dev.telemetry.status = "Active";
         } else {
             dev.telemetry.status = "Idle";

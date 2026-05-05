@@ -46,6 +46,14 @@ public:
     DeviceCache* get_cache(uint64_t asic_id);
     bool invalidate_cache();
 
+    /// Get TTDevice by UMD chip ID (used by NocAccessProvider).
+    tt::umd::TTDevice* get_tt_device_by_umd_chip_id(int chip_id);
+
+    /// Return the PCI ordinal of a local MMIO chip that has an ETH link to
+    /// the given remote chip, or -1 if none is known. Used by telemetry to
+    /// route CHIP_IN_USE checks for remotes to their MMIO parent.
+    int find_mmio_parent_ordinal(uint64_t remote_chip_id);
+
 private:
     struct ArchCluster {
         tt::ARCH arch = tt::ARCH::Invalid;

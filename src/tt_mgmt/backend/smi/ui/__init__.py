@@ -5,5 +5,6 @@
 
 from .dashboard import Dashboard
 from .graphs import GraphWindow
+from . import ascii_monitor
 
-__all__ = ["Dashboard", "GraphWindow"]
+__all__ = ["Dashboard", "GraphWindow", "ascii_monitor"]

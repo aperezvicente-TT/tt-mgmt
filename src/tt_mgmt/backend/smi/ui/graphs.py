@@ -6,15 +6,70 @@ Real-time telemetry graphs for TT devices (nvtop-style).
 Shows per-device line graphs with combined metrics like nvtop.
 """
 
+import json
+import os
 import time
 from collections import deque
-from typing import Dict, List, Deque
+from pathlib import Path
+from typing import Dict, List, Deque, Optional, Set
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.layout import Layout
 from rich.text import Text
 from rich import box
+
+
+def _cap_temp(arch):    return 80.0
+def _cap_power(arch):   return 300.0 if "Blackhole" in arch else 100.0
+def _cap_voltage(arch): return 1.2
+def _cap_current(arch): return 250.0 if "Blackhole" in arch else 130.0
+def _cap_aiclk(arch):   return 1500.0 if "Blackhole" in arch else 1000.0
+def _cap_pct(arch):     return 100.0
+
+
+AVAILABLE_METRICS = [
+    ("temp",        "temperature",        "Temp °C",    "red",              _cap_temp),
+    ("board_temp",  "board_temperature",  "Board °C",   "bright_red",       _cap_temp),
+    ("vreg_temp",   "vreg_temperature",   "VReg °C",    "bright_magenta",   _cap_temp),
+    ("power",       "power",              "Power W",    "yellow",           _cap_power),
+    ("voltage",     "voltage",            "VCORE V",    "blue",             _cap_voltage),
+    ("current",     "current",            "TDC A",      "magenta",          _cap_current),
+    ("aiclk",       "aiclk",              "AICLK MHz",  "bright_blue",      _cap_aiclk),
+    ("dram",        "dram_pct",           "DRAM %",     "cyan",             _cap_pct),
+    ("l1",          "l1_pct",             "L1 %",       "green",            _cap_pct),
+    ("l1_small",    "l1_small_pct",       "L1sm %",     "bright_green",     _cap_pct),
+    ("trace",       "trace_pct",          "Trace %",    "bright_yellow",    _cap_pct),
+    ("cb",          "cb_pct",             "CB %",       "white",            _cap_pct),
+]
+DEFAULT_SELECTED = {"temp", "power", "dram", "l1"}
+VALID_METRIC_KEYS = {m[0] for m in AVAILABLE_METRICS}
+
+_CONFIG_PATH = Path.home() / ".config" / "tt-mgmt" / "graphs.json"
+
+
+def load_selected_metrics() -> Set[str]:
+    """Read selected metrics from config; return DEFAULT_SELECTED on any error."""
+    try:
+        with open(_CONFIG_PATH, "r") as f:
+            data = json.load(f)
+        keys = data.get("selected_metrics", [])
+        filtered = {k for k in keys if k in VALID_METRIC_KEYS}
+        return filtered if filtered else set(DEFAULT_SELECTED)
+    except Exception:
+        return set(DEFAULT_SELECTED)
+
+
+def save_selected_metrics(keys: Set[str]) -> None:
+    """Atomically save selected metrics; swallow IO errors."""
+    try:
+        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _CONFIG_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w") as f:
+            json.dump({"selected_metrics": sorted(keys)}, f)
+        os.replace(tmp, _CONFIG_PATH)
+    except Exception:
+        pass
 
 
 class TelemetryHistory:
@@ -93,69 +148,36 @@ class TelemetryHistory:
             self.cb_pct.append(0.0)
 
 
-def _canvas_write(canvas, y, x, char, color):
-    """
-    Write *char* at canvas[y][x].
-
-    When a purely horizontal segment (─) from one metric meets a purely
-    vertical segment (│) from another, the cell becomes ┼ in the current
-    metric's color — showing both lines passing through.  All other overlaps
-    (corners, same-direction segments) use last-writer-wins so corner
-    characters are never distorted into spurious junction glyphs.
-    """
-    existing_char, _ = canvas[y][x]
-    if existing_char == "─" and char == "│":
-        canvas[y][x] = ("┼", color)
-    elif existing_char == "│" and char == "─":
-        canvas[y][x] = ("┼", color)
-    else:
-        canvas[y][x] = (char, color)
+# (dx, dy, bit) for the 8 dots of a 2x4 braille cell — see U+2800 block.
+_CELL_BITS = [
+    (0, 0, 0x01), (0, 1, 0x02), (0, 2, 0x04), (0, 3, 0x40),
+    (1, 0, 0x08), (1, 1, 0x10), (1, 2, 0x20), (1, 3, 0x80),
+]
 
 
-def _plot_metric_to_canvas(canvas, values, max_val, color, height):
-    """Draw a single metric's line into *canvas* using box-drawing characters."""
-    graph_width = len(canvas[0])
-    if not values or max_val == 0:
-        return
-
-    sampled = list(values)[-graph_width:] if len(values) > graph_width else list(values)
-
-    prev_y = None
-    for x, val in enumerate(sampled):
-        y_norm = val / max_val
-        y = int((1.0 - y_norm) * (height - 1))
-        y = max(0, min(height - 1, y))
-
-        if prev_y is not None and x > 0:
-            if prev_y == y:
-                _canvas_write(canvas, y, x, "─", color)
-            elif prev_y < y:
-                # Going DOWN visually
-                _canvas_write(canvas, prev_y, x - 1, "┐", color)
-                for yf in range(prev_y + 1, y):
-                    _canvas_write(canvas, yf, x - 1, "│", color)
-                _canvas_write(canvas, y, x - 1, "└", color)
-                _canvas_write(canvas, y, x, "─", color)
-            else:
-                # Going UP visually
-                _canvas_write(canvas, prev_y, x - 1, "┘", color)
-                for yf in range(y + 1, prev_y):
-                    _canvas_write(canvas, yf, x - 1, "│", color)
-                _canvas_write(canvas, y, x - 1, "┌", color)
-                _canvas_write(canvas, y, x, "─", color)
-        else:
-            _canvas_write(canvas, y, x, "─", color)
-
-        prev_y = y
+def _bresenham(x0, y0, x1, y1):
+    dx = abs(x1 - x0)
+    dy = -abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx + dy
+    x, y = x0, y0
+    while True:
+        yield (x, y)
+        if x == x1 and y == y1:
+            return
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
 
 
 def render_combined_graph(metrics: List[tuple], width: int = 60, height: int = 12) -> Text:
     """
-    Render multiple metrics on the same graph (nvtop-style).
-
-    Each metric is drawn in its own color onto a shared canvas using
-    last-writer-wins: where lines cross, the later metric's color and
-    character show through, exactly as nvtop behaves.
+    Render multiple metrics on the same graph using braille sub-cell dots.
 
     Args:
         metrics: List of (values, max_val, label, color, current_val) tuples
@@ -171,14 +193,62 @@ def render_combined_graph(metrics: List[tuple], width: int = 60, height: int = 1
             result.append(" " * width + "\n")
         return result
 
-    canvas = [[(" ", "white") for _ in range(width)] for _ in range(height)]
+    DOT_W = width * 2
+    DOT_H = height * 4
 
-    for values, max_val, label, color, current_val in metrics:
+    series = []
+    for order, (values, max_val, label, color, current_val) in enumerate(metrics):
         if not values:
             continue
         if not max_val or max_val == 0:
             max_val = 100.0
-        _plot_metric_to_canvas(canvas, values, max_val, color, height)
+
+        grid = [[0] * DOT_W for _ in range(DOT_H)]
+        sampled = list(values)[-DOT_W:] if len(values) > DOT_W else list(values)
+        n = len(sampled)
+        x_scale = (DOT_W - 1) / (n - 1) if n > 1 else 0
+
+        pts = []
+        for i, v in enumerate(sampled):
+            y_norm = max(0.0, min(1.0, v / max_val))
+            y = int(round((1.0 - y_norm) * (DOT_H - 1)))
+            y = max(0, min(DOT_H - 1, y))
+            x = int(round(i * x_scale)) if n > 1 else DOT_W - 1
+            pts.append((x, y))
+
+        if len(pts) == 1:
+            x, y = pts[0]
+            grid[y][x] = 1
+        else:
+            for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+                for (xx, yy) in _bresenham(x0, y0, x1, y1):
+                    if 0 <= xx < DOT_W and 0 <= yy < DOT_H:
+                        grid[yy][xx] = 1
+
+        series.append((grid, color, order))
+
+    out_cells = [[(" ", "white") for _ in range(width)] for _ in range(height)]
+    for cy in range(height):
+        for cx in range(width):
+            mask = 0
+            contributors = []
+            base_y = cy * 4
+            base_x = cx * 2
+            for grid, color, order in series:
+                series_mask = 0
+                for (dx, dy, bit) in _CELL_BITS:
+                    if grid[base_y + dy][base_x + dx]:
+                        series_mask |= bit
+                if series_mask:
+                    mask |= series_mask
+                    contributors.append((order, color))
+            if mask:
+                if len(contributors) == 1:
+                    chosen = contributors[0][1]
+                else:
+                    contributors.sort()
+                    chosen = contributors[cx % len(contributors)][1]
+                out_cells[cy][cx] = (chr(0x2800 + mask), chosen)
 
     # --- Build Rich Text output ---
     result = Text()
@@ -196,9 +266,9 @@ def render_combined_graph(metrics: List[tuple], width: int = 60, height: int = 1
     result.append("\n")
 
     # Y-axis labels at top / middle / bottom rows
-    y_label_map = {0: "100", height // 2: "50", height - 1: "0"}
+    y_label_map = {0: "HI", height // 2: "MID", height - 1: "LO"}
 
-    for row_idx, row in enumerate(canvas):
+    for row_idx, row in enumerate(out_cells):
         lbl = y_label_map.get(row_idx, "")
         result.append(lbl.rjust(4) + "│", style="dim")
         for char, color in row:
@@ -214,10 +284,20 @@ class GraphWindow:
     Interactive graph window showing telemetry history (nvtop-style).
     """
 
-    def __init__(self, console: Console, history_size: int = 100):
+    def __init__(self, console: Console, history_size: int = 100,
+                 selected_metrics: Optional[Set[str]] = None):
         self.history: Dict[str, TelemetryHistory] = {}
         self.console = console
         self.history_size = history_size
+        if selected_metrics is None:
+            self.selected_metrics: Set[str] = load_selected_metrics()
+        else:
+            self.selected_metrics = set(selected_metrics)
+
+    def set_selected_metrics(self, keys: Set[str]) -> None:
+        """Replace selection and persist to config."""
+        self.selected_metrics = set(keys)
+        save_selected_metrics(self.selected_metrics)
 
     def _calculate_optimal_layout(self, num_devices: int, terminal_width: int, terminal_height: int) -> tuple:
         """
@@ -259,7 +339,7 @@ class GraphWindow:
 
         self.history[device_id].add_sample(device)
 
-    def render_device_card(self, device_id: str, device, chart_height: int = 30, chart_width: int = 60) -> Panel:
+    def render_device_card(self, device_id: str, device, chart_height: int = 30, chart_width: int = 60, card_width: int = 0) -> Panel:
         """
         Render a single device card with combined graphs (nvtop-style).
 
@@ -268,6 +348,7 @@ class GraphWindow:
             device: Device object with telemetry
             chart_height: Height of chart in rows
             chart_width: Width of chart in columns (dynamic based on terminal size)
+            card_width: Total card width (used to size bars so they don't wrap)
         """
         if device_id not in self.history:
             return Panel(f"No data for device {device_id}", title=device_id, border_style="cyan")
@@ -300,8 +381,11 @@ class GraphWindow:
         l1_total   = getattr(device, "total_l1", 0)
         l1_pct     = (l1_used / l1_total * 100.0) if l1_total > 0 else 0.0
 
-        # Compact header
-        header = Text()
+        # Content width inside the outer Panel (2 borders + 2 horizontal padding)
+        content_width = card_width - 4 if card_width > 0 else 60
+
+        # Compact header — use no_wrap to prevent line wrapping
+        header = Text(no_wrap=True, overflow="ellipsis")
         header.append(getattr(device, "arch_name", "Unknown"), style="cyan bold")
         header.append("  ")
         header.append(f"T:{temp_current:.0f}°C",
@@ -312,35 +396,51 @@ class GraphWindow:
         header.append(f"~{aiclk_current}MHz", style="blue")
         layout.add_row(header)
 
+        # Dynamic bar width: fit "DRAM [" (6) + bar + "] " (2) + suffix within content_width
+        dram_suffix = f"{fmt_sz(dram_used)}/{fmt_sz(dram_total)}"
+        l1_suffix = f"{fmt_sz(l1_used)}/{fmt_sz(l1_total)}"
+        bar_overhead = 6 + 2  # "DRAM [" + "] "
+        max_suffix = max(len(dram_suffix), len(l1_suffix))
+        bar_width = max(5, content_width - bar_overhead - max_suffix)
+
         # DRAM bar
-        dbar_len = int(dram_pct / 100.0 * 20)
-        dram_bar = Text()
+        dbar_len = int(dram_pct / 100.0 * bar_width)
+        dram_bar = Text(no_wrap=True, overflow="ellipsis")
         dram_bar.append("DRAM [", style="white")
         dram_bar.append("|" * dbar_len, style="green")
-        dram_bar.append(" " * (20 - dbar_len), style="dim")
-        dram_bar.append(f"] {fmt_sz(dram_used)}/{fmt_sz(dram_total)}", style="white")
+        dram_bar.append(" " * (bar_width - dbar_len), style="dim")
+        dram_bar.append(f"] {dram_suffix}", style="white")
         layout.add_row(dram_bar)
 
         # L1 bar
-        l1bar_len = int(l1_pct / 100.0 * 20)
-        l1_bar = Text()
+        l1bar_len = int(l1_pct / 100.0 * bar_width)
+        l1_bar = Text(no_wrap=True, overflow="ellipsis")
         l1_bar.append("L1   [", style="white")
         l1_bar.append("|" * l1bar_len, style="green")
-        l1_bar.append(" " * (20 - l1bar_len), style="dim")
-        l1_bar.append(f"] {fmt_sz(l1_used)}/{fmt_sz(l1_total)}", style="white")
+        l1_bar.append(" " * (bar_width - l1bar_len), style="dim")
+        l1_bar.append(f"] {l1_suffix}", style="white")
         layout.add_row(l1_bar)
 
         layout.add_row("")
 
-        metrics = [
-            (list(hist.temperature), 100.0, "Temp °C", "red",    temp_current),
-            (list(hist.power),       100.0, "Power W", "yellow", power_current),
-            (list(hist.dram_pct),    100.0, "DRAM %",  "cyan",   dram_current),
-            (list(hist.l1_pct),      100.0, "L1 %",    "blue",   l1_current),
-        ]
+        metrics = []
+        arch = getattr(device, "arch_name", "")
+        for key, attr, label, color, cap_fn in AVAILABLE_METRICS:
+            if key not in self.selected_metrics:
+                continue
+            series = list(getattr(hist, attr))
+            if not series:
+                continue
+            cap = cap_fn(arch)
+            current_val = series[-1]
+            metrics.append((series, cap, label, color, current_val))
 
-        combined_graph = render_combined_graph(metrics, width=chart_width, height=chart_height)
-        graph_panel = Panel(combined_graph, title="[cyan]Telemetry & Memory History[/]", border_style="cyan")
+        if not metrics:
+            note = Text("No metrics selected — press 'm' to choose", style="dim")
+            graph_panel = Panel(note, title="[cyan]Telemetry & Memory History[/]", border_style="cyan")
+        else:
+            combined_graph = render_combined_graph(metrics, width=chart_width, height=chart_height)
+            graph_panel = Panel(combined_graph, title="[cyan]Telemetry & Memory History[/]", border_style="cyan")
         layout.add_row(graph_panel)
 
         return Panel(layout, title=f"[cyan bold]{device_id}[/]", border_style="cyan", padding=(0, 1))
@@ -403,7 +503,7 @@ class GraphWindow:
         device_panels = []
         for dev in devices:
             device_id = dev.display_id if hasattr(dev, "display_id") else str(dev.chip_id)
-            device_panels.append(self.render_device_card(device_id, dev, chart_height, chart_width))
+            device_panels.append(self.render_device_card(device_id, dev, chart_height, chart_width, card_width=available_width))
 
         # Apply the calculated layout dynamically (rows × cols)
         num_devices = len(device_panels)

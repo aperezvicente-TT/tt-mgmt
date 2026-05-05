@@ -84,6 +84,20 @@ DeviceCache* UmdDiscoveryProvider::get_cache(uint64_t asic_id) {
     return nullptr;
 }
 
+int UmdDiscoveryProvider::find_mmio_parent_ordinal(uint64_t remote_chip_id) {
+    for (auto& [asic_id, cache] : device_cache_) {
+        if (cache.is_remote || cache.pci_ordinal < 0) {
+            continue;
+        }
+        for (const auto& conn : cache.eth_connections) {
+            if (conn.remote_chip_id == remote_chip_id) {
+                return cache.pci_ordinal;
+            }
+        }
+    }
+    return -1;
+}
+
 void UmdDiscoveryProvider::initialize() {
     if (initialized_) {
         return;
@@ -368,8 +382,7 @@ std::vector<DeviceInfo> UmdDiscoveryProvider::discover() {
         dev.is_remote = cache.is_remote;
 
         char display_buf[24];
-        snprintf(display_buf, sizeof(display_buf), "%llx%s", (unsigned long long)cache.chip_id,
-                 cache.is_remote ? "R" : "");
+        snprintf(display_buf, sizeof(display_buf), "%llx", (unsigned long long)cache.chip_id);
         dev.display_id = display_buf;
 
         set_memory_sizes(dev, cache.tt_device.get());
@@ -384,6 +397,37 @@ std::vector<DeviceInfo> UmdDiscoveryProvider::discover() {
     }
 
     return devices;
+}
+
+tt::umd::TTDevice* UmdDiscoveryProvider::get_tt_device_by_umd_chip_id(int chip_id) {
+    if (!initialized_) {
+        initialize();
+    }
+    // Build an ordered list of all devices: local first (sorted by pci_ordinal),
+    // then remote (sorted by asic_id). This matches the discover() output order.
+    std::vector<std::pair<int, uint64_t>> local_devices;  // (pci_ordinal, asic_id)
+    std::vector<uint64_t> remote_devices;                  // asic_id
+    for (auto& [asic_id, cache] : device_cache_) {
+        if (!cache.tt_device) continue;
+        if (cache.is_remote) {
+            remote_devices.push_back(asic_id);
+        } else {
+            local_devices.emplace_back(cache.pci_ordinal, asic_id);
+        }
+    }
+    std::sort(local_devices.begin(), local_devices.end());
+    std::sort(remote_devices.begin(), remote_devices.end());
+
+    // Index: [0..N-1] = local devices, [N..N+M-1] = remote devices
+    int idx = chip_id;
+    if (idx >= 0 && idx < static_cast<int>(local_devices.size())) {
+        return device_cache_[local_devices[idx].second].tt_device.get();
+    }
+    idx -= static_cast<int>(local_devices.size());
+    if (idx >= 0 && idx < static_cast<int>(remote_devices.size())) {
+        return device_cache_[remote_devices[idx]].tt_device.get();
+    }
+    return nullptr;
 }
 
 }  // namespace tt_device_hal

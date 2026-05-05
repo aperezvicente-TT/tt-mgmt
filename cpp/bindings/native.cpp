@@ -5,8 +5,11 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/unique_ptr.h>
+#include <stdexcept>
+#include <string>
 #include "tt_device_hal/device_manager.hpp"
 #include "tt_device_hal/types.hpp"
+#include <umd/device/logging/config.hpp>
 
 namespace nb = nanobind;
 using namespace tt_device_hal;
@@ -161,9 +164,48 @@ NB_MODULE(native, m) {
         .def("has_fabric", &DeviceManager::has_fabric)
         .def("get_cluster_topology", &DeviceManager::get_cluster_topology)
         .def("get_placements", &DeviceManager::get_placements,
-             nb::arg("mgd_textproto"), nb::arg("host_ids") = std::vector<std::string>{});
+             nb::arg("mgd_textproto"), nb::arg("host_ids") = std::vector<std::string>{})
+        .def("noc_read", [](DeviceManager& self, int chip_id, uint32_t noc_x, uint32_t noc_y,
+                            uint64_t addr, uint32_t size) -> nb::bytes {
+            auto data = self.noc_read(chip_id, noc_x, noc_y, addr, size);
+            return nb::bytes(reinterpret_cast<const char*>(data.data()), data.size());
+        }, nb::arg("chip_id"), nb::arg("noc_x"), nb::arg("noc_y"),
+           nb::arg("addr"), nb::arg("size"),
+           "Read bytes from device NOC memory")
+        .def("noc_write", [](DeviceManager& self, int chip_id, uint32_t noc_x, uint32_t noc_y,
+                             uint64_t addr, nb::bytes data) {
+            std::vector<uint8_t> vec(data.c_str(), data.c_str() + data.size());
+            self.noc_write(chip_id, noc_x, noc_y, addr, vec);
+        }, nb::arg("chip_id"), nb::arg("noc_x"), nb::arg("noc_y"),
+           nb::arg("addr"), nb::arg("data"),
+           "Write bytes to device NOC memory")
+        .def("noc_read32", &DeviceManager::noc_read32,
+             nb::arg("chip_id"), nb::arg("noc_x"), nb::arg("noc_y"), nb::arg("addr"),
+             "Read a 32-bit word from device NOC memory")
+        .def("noc_write32", &DeviceManager::noc_write32,
+             nb::arg("chip_id"), nb::arg("noc_x"), nb::arg("noc_y"),
+             nb::arg("addr"), nb::arg("value"),
+             "Write a 32-bit word to device NOC memory")
+        .def("get_eth_cores", &DeviceManager::get_eth_cores,
+             nb::arg("chip_id"),
+             "Get ETH core NOC0 coordinates as list of (noc_x, noc_y) tuples");
 
     // ---- Free functions ----
 
     m.def("format_bytes", &tt_device_hal::format_bytes);
+
+    m.def("set_umd_log_level", [](const std::string& lvl) {
+        using tt::umd::logging::level;
+        level out;
+        if (lvl == "trace") out = level::trace;
+        else if (lvl == "debug") out = level::debug;
+        else if (lvl == "info") out = level::info;
+        else if (lvl == "warn" || lvl == "warning") out = level::warn;
+        else if (lvl == "error") out = level::error;
+        else if (lvl == "critical") out = level::critical;
+        else if (lvl == "off") out = level::off;
+        else throw std::invalid_argument("Unknown UMD log level: " + lvl);
+        tt::umd::logging::set_level(out);
+    }, nb::arg("level"),
+       "Set UMD logging level: trace|debug|info|warn|error|critical|off");
 }

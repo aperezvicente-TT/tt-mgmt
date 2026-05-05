@@ -59,13 +59,3 @@ def get_device_info(device_id, verbose=False):
             for p in dev.processes
         ] if verbose else []
     }
-
-
-def reset_device(device_id):
-    """Reset a device. Not implemented."""
-    pass
-
-
-def get_telemetry(device_id):
-    """Get device telemetry. Not implemented."""
-    return {}

@@ -12,7 +12,8 @@ import click
 @click.option("--csv", "csv_mode", is_flag=True,
               help="Force CSV output (default is JSONL).")
 @click.option("-i", "--interval", type=str, default="1s",
-              help="Sample interval (e.g. 500ms, 1s, 2.5s). Default: 1s.")
+              help="Sample interval. Bare numbers are milliseconds (e.g. 250 = 250ms); "
+                   "use a unit for seconds/minutes (e.g. 1s, 2.5s, 5m). Default: 1s.")
 @click.option("-d", "--duration", type=str, default=None,
               help="Recording duration (e.g. 30s, 5m, 1h). Default: until Ctrl-C.")
 @click.option("--pid", type=str, default=None,
