@@ -28,6 +28,12 @@ _deps/
 run.html
 run.jsonl
 
+# tt-mgmt recording / dashboard artifacts
+session_*.jsonl
+session_*.html
+*.log
+tt-live-dashboard.html
+
 # Editor / OS
 .DS_Store
 *.swp

@@ -3,7 +3,8 @@
 import click
 from rich.table import Table
 from rich.text import Text
-from rich import box
+
+from tt_mgmt import ui
 
 
 @click.group()
@@ -84,7 +85,7 @@ def links(ctx, device_filter, exit_only):
 
         chip_id_to_display = {dev.chip_id: dev.display_id for dev in devices}
 
-        table = Table(title="Ethernet Links", box=box.ROUNDED, show_header=True, header_style="bold")
+        table = Table(title="Ethernet Links", box=ui.get_box(), show_header=True, header_style="bold")
         table.add_column("Device", style="cyan")
         table.add_column("Arch", style="dim")
         table.add_column("Local Ch", justify="right")
@@ -146,7 +147,7 @@ def topology(ctx):
             return
 
         table = Table(
-            title="Board Ethernet Connectivity", box=box.ROUNDED,
+            title="Board Ethernet Connectivity", box=ui.get_box(),
             show_header=True, header_style="bold",
         )
         table.add_column("Board / ASIC", style="cyan", width=24)
@@ -255,7 +256,7 @@ def cluster(ctx):
                        f"({len(info['hosts'])} hosts, "
                        f"{info['total_cross_host_links']} cross-host links)\n")
 
-        table = Table(box=box.ROUNDED, show_header=True, header_style="bold")
+        table = Table(box=ui.get_box(), show_header=True, header_style="bold")
         table.add_column("Host", style="cyan")
         table.add_column("ASICs", justify="right")
         table.add_column("Arch", style="dim")
@@ -314,7 +315,7 @@ def placement(ctx, mgd, host_ids):
 
         for i, p_set in enumerate(result["placements"]):
             console.print(f"[bold]Placement {i + 1}:[/bold]")
-            table = Table(box=box.SIMPLE, show_header=True, header_style="bold dim")
+            table = Table(box=ui.get_simple_box(), show_header=True, header_style="bold dim")
             table.add_column("Host", style="cyan")
             table.add_column("Rank", justify="right")
             table.add_column("ASICs")
@@ -372,7 +373,7 @@ def health(ctx):
         console.print(f"  Cross-host links: {info['total_cross_host_links']}")
         console.print()
 
-        table = Table(box=box.ROUNDED, show_header=True, header_style="bold")
+        table = Table(box=ui.get_box(), show_header=True, header_style="bold")
         table.add_column("Host", style="cyan")
         table.add_column("ASICs", justify="right")
         table.add_column("Peers", justify="right")

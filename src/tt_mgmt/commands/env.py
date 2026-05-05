@@ -7,6 +7,7 @@ import click
 from rich.table import Table
 from rich.text import Text
 
+from tt_mgmt import ui
 from tt_mgmt.backend import env_backend
 from tt_mgmt.backend.env import CATEGORIES
 
@@ -92,7 +93,7 @@ def list_cmd(ctx, fmt, show_all):
         console.print("[dim]No TT_* variables are currently set in the environment.[/dim]")
         return
 
-    table = Table(title="Active TT Environment Variables", show_lines=False)
+    table = Table(title="Active TT Environment Variables", show_lines=False, box=ui.get_box())
     table.add_column("Variable", style="bold", no_wrap=True)
     table.add_column("Value", style="green")
     table.add_column("Category", no_wrap=True)
@@ -163,7 +164,7 @@ def show_cmd(ctx, category, set_only, profile):
     cat_header = f"  Category: [bold]{category}[/bold]" if category else ""
     title = f"TT Environment Variable Catalog — {source_label}{cat_header}"
 
-    table = Table(title=title, show_lines=True, expand=True)
+    table = Table(title=title, show_lines=True, expand=True, box=ui.get_box())
     table.add_column("Variable", style="bold", no_wrap=True, min_width=38)
     table.add_column("Cat", no_wrap=True, min_width=9)
     table.add_column("Current Value", min_width=20)
@@ -376,7 +377,7 @@ def profile_cmd(ctx, clear):
         )
         return
 
-    table = Table(show_lines=False)
+    table = Table(show_lines=False, box=ui.get_simple_box())
     table.add_column("Variable", style="bold", no_wrap=True)
     table.add_column("Saved Value", style="green")
     table.add_column("Live Shell Value")

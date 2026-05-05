@@ -9,6 +9,7 @@
 #include "providers/sysfs_discovery.hpp"
 #include "providers/sysfs_telemetry.hpp"
 #include "providers/fabric_manager_provider.hpp"
+#include "providers/umd_noc_access.hpp"
 
 #include "umd/device/pcie/pci_device.hpp"
 
@@ -35,6 +36,41 @@ void DeviceManager::set_memory_provider(std::unique_ptr<MemoryProvider> p) {
 
 void DeviceManager::set_fabric_provider(std::unique_ptr<FabricProvider> p) {
     fabric_ = std::move(p);
+}
+
+void DeviceManager::set_noc_access_provider(std::unique_ptr<NocAccessProvider> p) {
+    noc_access_ = std::move(p);
+}
+
+std::vector<uint8_t> DeviceManager::noc_read(int chip_id, uint32_t noc_x, uint32_t noc_y,
+                                              uint64_t addr, uint32_t size) {
+    if (!noc_access_) {
+        throw std::runtime_error("No NOC access provider configured");
+    }
+    return noc_access_->read(chip_id, noc_x, noc_y, addr, size);
+}
+
+void DeviceManager::noc_write(int chip_id, uint32_t noc_x, uint32_t noc_y,
+                               uint64_t addr, const std::vector<uint8_t>& data) {
+    if (!noc_access_) {
+        throw std::runtime_error("No NOC access provider configured");
+    }
+    noc_access_->write(chip_id, noc_x, noc_y, addr, data);
+}
+
+uint32_t DeviceManager::noc_read32(int chip_id, uint32_t noc_x, uint32_t noc_y, uint64_t addr) {
+    if (!noc_access_) {
+        throw std::runtime_error("No NOC access provider configured");
+    }
+    return noc_access_->read32(chip_id, noc_x, noc_y, addr);
+}
+
+void DeviceManager::noc_write32(int chip_id, uint32_t noc_x, uint32_t noc_y,
+                                 uint64_t addr, uint32_t value) {
+    if (!noc_access_) {
+        throw std::runtime_error("No NOC access provider configured");
+    }
+    noc_access_->write32(chip_id, noc_x, noc_y, addr, value);
 }
 
 std::vector<DeviceInfo>& DeviceManager::discover() {
@@ -136,6 +172,18 @@ std::string DeviceManager::backend_name() const {
     return "none";
 }
 
+std::vector<std::pair<uint32_t, uint32_t>> DeviceManager::get_eth_cores(int chip_id) {
+    if (!noc_access_) {
+        throw std::runtime_error("No NOC access provider configured");
+    }
+    // Downcast to UmdNocAccessProvider to access get_eth_cores
+    auto* umd_noc = dynamic_cast<UmdNocAccessProvider*>(noc_access_.get());
+    if (!umd_noc) {
+        throw std::runtime_error("get_eth_cores requires UMD backend");
+    }
+    return umd_noc->get_eth_cores(chip_id);
+}
+
 // ---- Factory: UMD (default) ----
 
 std::unique_ptr<DeviceManager> DeviceManager::create_default() {
@@ -145,6 +193,7 @@ std::unique_ptr<DeviceManager> DeviceManager::create_default() {
     mgr->set_discovery(std::move(discovery));
     mgr->add_telemetry_provider(std::make_unique<UmdTelemetryProvider>(disc_ptr));
     mgr->set_memory_provider(std::make_unique<ShmMemoryProvider>(disc_ptr));
+    mgr->set_noc_access_provider(std::make_unique<UmdNocAccessProvider>(disc_ptr));
     return mgr;
 }
 

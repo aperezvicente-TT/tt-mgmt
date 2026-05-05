@@ -37,9 +37,10 @@ def _get_manager(backend: str = "auto", fabric_endpoint: str | None = None):
     return _manager
 
 
-def set_backend(backend: str, fabric_endpoint: str | None = None):
+def set_backend(backend: str, fabric_endpoint: str | None = None, verbose: bool = False):
     """Set the backend, only recreating the manager if the choice changed."""
     global _manager, _current_backend, _fabric_endpoint
+    _set_umd_log_level("info" if verbose else "error")
     if (_manager is not None
             and _current_backend == backend
             and _fabric_endpoint == fabric_endpoint):
@@ -48,6 +49,19 @@ def set_backend(backend: str, fabric_endpoint: str | None = None):
     _current_backend = None
     _fabric_endpoint = None
     _get_manager(backend, fabric_endpoint=fabric_endpoint)
+
+
+def _set_umd_log_level(level: str) -> None:
+    """Best-effort UMD log level configuration."""
+    try:
+        if native is not None and hasattr(native, "set_umd_log_level"):
+            native.set_umd_log_level(level)
+    except Exception:
+        pass
+
+
+# Default UMD log level on import: suppress info/warn spam.
+_set_umd_log_level("error")
 
 
 def get_backend() -> str:

@@ -13,13 +13,15 @@ from rich.panel import Panel
 from rich.layout import Layout
 from rich.text import Text
 from rich import box
+
+from tt_mgmt import ui as _ui
 import time
 import sys
 import os
 import signal
 import threading
 
-from .graphs import GraphWindow
+from .graphs import GraphWindow, AVAILABLE_METRICS
 import termios
 import tty
 import select
@@ -48,8 +50,8 @@ def format_runtime(seconds):
 class Dashboard:
     """Live dashboard using Rich library."""
 
-    def __init__(self, console: Console = None):
-        self.console = console or Console()
+    def __init__(self, console: Console = None, selected_metrics=None):
+        self.console = console or _ui.get_console()
         self.selected_pid_index = 0
         self.available_pids = []
         self._kill_pid = None
@@ -63,7 +65,10 @@ class Dashboard:
         # Per-device GDDR activity tracking: device_id -> (gddr01, gddr23, gddr45, gddr67, last_change_time)
         self._gddr_snapshot: dict = {}
         self._active_tab = 1  # 1 = Overview, 2 = Telemetry, 3 = Fabric, 4 = Graphs
-        self._graph_window = GraphWindow(self.console, history_size=100)
+        self._graph_window = GraphWindow(self.console, history_size=100,
+                                         selected_metrics=selected_metrics)
+        self._show_metric_picker = False
+        self._picker_cursor = 0
 
     def _keyboard_reader(self):
         """Background keyboard reader thread using os.read for lower-level control."""
@@ -95,21 +100,63 @@ class Dashboard:
                                 next_chars += os.read(fd, 1).decode('utf-8', errors='ignore')
                             if select.select([fd], [], [], 0.01)[0]:
                                 next_chars += os.read(fd, 1).decode('utf-8', errors='ignore')
-                            
+
                             debug.write(f"Escape sequence: {repr(next_chars)}\n")
                             debug.flush()
-                            
-                            if next_chars == '[A' and self.available_pids:  # Up
-                                debug.write(f"UP! Moving from {self.selected_pid_index}\n")
-                                self.selected_pid_index = max(0, self.selected_pid_index - 1)
-                                debug.write(f"UP! Now at {self.selected_pid_index}\n")
+
+                            picker_open = self._show_metric_picker and self._active_tab == 4
+
+                            if not next_chars and picker_open:
+                                # Bare ESC — close picker
+                                debug.write("PICKER: ESC closes\n")
+                                debug.flush()
+                                self._show_metric_picker = False
+                                self._force_refresh = True
+                            elif next_chars == '[A':  # Up
+                                if picker_open:
+                                    self._picker_cursor = max(0, self._picker_cursor - 1)
+                                    debug.write(f"PICKER UP: cursor={self._picker_cursor}\n")
+                                    debug.flush()
+                                    self._force_refresh = True
+                                elif self.available_pids:
+                                    debug.write(f"UP! Moving from {self.selected_pid_index}\n")
+                                    self.selected_pid_index = max(0, self.selected_pid_index - 1)
+                                    debug.write(f"UP! Now at {self.selected_pid_index}\n")
+                                    debug.flush()
+                                    self._force_refresh = True
+                            elif next_chars == '[B':  # Down
+                                if picker_open:
+                                    self._picker_cursor = min(len(AVAILABLE_METRICS) - 1, self._picker_cursor + 1)
+                                    debug.write(f"PICKER DOWN: cursor={self._picker_cursor}\n")
+                                    debug.flush()
+                                    self._force_refresh = True
+                                elif self.available_pids:
+                                    debug.write(f"DOWN! Moving from {self.selected_pid_index}\n")
+                                    self.selected_pid_index = min(len(self.available_pids) - 1, self.selected_pid_index + 1)
+                                    debug.write(f"DOWN! Now at {self.selected_pid_index}\n")
+                                    debug.flush()
+                                    self._force_refresh = True
+                        elif self._show_metric_picker and self._active_tab == 4:
+                            # Picker is open — intercept all non-quit keys
+                            if ch.lower() == 'q':
+                                debug.write("QUIT requested (from picker)!\n")
+                                debug.flush()
+                                self._quit = True
+                            elif ch == ' ':
+                                key = AVAILABLE_METRICS[self._picker_cursor][0]
+                                current = set(self._graph_window.selected_metrics)
+                                if key in current:
+                                    current.discard(key)
+                                else:
+                                    current.add(key)
+                                self._graph_window.set_selected_metrics(current)
+                                debug.write(f"PICKER TOGGLE: {key} -> {key in current}\n")
                                 debug.flush()
                                 self._force_refresh = True
-                            elif next_chars == '[B' and self.available_pids:  # Down
-                                debug.write(f"DOWN! Moving from {self.selected_pid_index}\n")
-                                self.selected_pid_index = min(len(self.available_pids) - 1, self.selected_pid_index + 1)
-                                debug.write(f"DOWN! Now at {self.selected_pid_index}\n")
+                            elif ch in ('\r', '\n', 'm'):
+                                debug.write("PICKER: close\n")
                                 debug.flush()
+                                self._show_metric_picker = False
                                 self._force_refresh = True
                         elif ch == '1':
                             if self._active_tab != 1:
@@ -127,6 +174,13 @@ class Dashboard:
                             if self._active_tab != 4:
                                 self._active_tab = 4
                                 self._force_refresh = True
+                        elif ch == 'm' and self._active_tab == 4:
+                            self._show_metric_picker = not self._show_metric_picker
+                            if self._show_metric_picker:
+                                self._picker_cursor = max(0, min(self._picker_cursor, len(AVAILABLE_METRICS) - 1))
+                            debug.write(f"PICKER TOGGLE: open={self._show_metric_picker}\n")
+                            debug.flush()
+                            self._force_refresh = True
                         elif ch == 'k' and self.available_pids:  # k = SIGKILL
                             debug.write(f"KILL (SIGKILL) requested for PID index {self.selected_pid_index}: {self.available_pids[self.selected_pid_index]}\n")
                             debug.flush()
@@ -174,7 +228,7 @@ class Dashboard:
                 header_text.append(f" [{tab_num}] {tab_name} ", style="bold black on cyan")
             else:
                 header_text.append(f" [{tab_num}] {tab_name} ", style="dim")
-        return Panel(header_text, box=box.DOUBLE, border_style="cyan")
+        return Panel(header_text, box=_ui.get_double_box(), border_style="cyan")
 
     @staticmethod
     def _board_type(arch_name: str, num_chips: int) -> str:
@@ -207,18 +261,18 @@ class Dashboard:
     def render_device_table(self, devices: List[Device]) -> Table:
         """Render main device table grouped by board, ASICs nested within."""
 
-        table = Table(box=box.ROUNDED, show_header=True, header_style="bold")
+        table = Table(box=_ui.get_box(), show_header=True, header_style="bold")
 
         table.add_column("Board / ASIC", style="cyan", no_wrap=True, header_style="bold cyan", justify="center")
-        table.add_column("KMD", width=3, justify="center", header_style="bold")
-        table.add_column("LID", width=3, justify="center", header_style="bold")
-        table.add_column("BDF", width=12, justify="center", header_style="bold")
-        table.add_column("Temp", width=5, justify="center", header_style="bold")
-        table.add_column("Power", width=5, justify="center", header_style="bold")
-        table.add_column("AICLK", width=10, justify="center", header_style="bold")
-        table.add_column("DRAM Usage", width=22, justify="center", header_style="bold")
-        table.add_column("L1 Usage", width=22, justify="center", header_style="bold")
-        table.add_column("Status", width=6, justify="center", header_style="bold")
+        table.add_column("KMD", no_wrap=True, justify="center", header_style="bold")
+        table.add_column("LID", no_wrap=True, justify="center", header_style="bold")
+        table.add_column("BDF", no_wrap=True, justify="center", header_style="bold")
+        table.add_column("Temp", no_wrap=True, justify="center", header_style="bold")
+        table.add_column("Power", no_wrap=True, justify="center", header_style="bold")
+        table.add_column("AICLK", no_wrap=True, justify="center", header_style="bold")
+        table.add_column("DRAM Usage", no_wrap=True, justify="center", header_style="bold")
+        table.add_column("L1 Usage", no_wrap=True, justify="center", header_style="bold")
+        table.add_column("Status", no_wrap=True, justify="center", header_style="bold")
 
         for board_id, arch_name, board_type, board_devs in self._group_by_board(devices):
             board_label = f"[bold]{board_type}[/bold] [dim]({arch_name})[/dim]"
@@ -351,7 +405,7 @@ class Dashboard:
         """Wormhole-specific detailed telemetry table, grouped by board."""
         table = Table(
             title="Wormhole Telemetry",
-            box=box.ROUNDED,
+            box=_ui.get_box(),
             show_header=True,
             header_style="bold",
         )
@@ -401,7 +455,7 @@ class Dashboard:
         """Blackhole-specific detailed telemetry table, grouped by board."""
         table = Table(
             title="Blackhole Telemetry",
-            box=box.ROUNDED,
+            box=_ui.get_box(),
             show_header=True,
             header_style="bold",
         )
@@ -481,7 +535,7 @@ class Dashboard:
 
         table = Table(
             title="Blackhole GDDR Temperatures",
-            box=box.ROUNDED,
+            box=_ui.get_box(),
             show_header=True,
             header_style="bold",
         )
@@ -606,24 +660,24 @@ class Dashboard:
 
         table = Table(
             title=title_text,
-            box=box.ROUNDED,
+            box=_ui.get_box(),
             show_header=True,
             header_style="bold",
         )
 
-        table.add_column("Dev",      style="cyan", width=12)
-        table.add_column("PID",      width=6,  justify="center")
-        table.add_column("Process",  width=10)
-        table.add_column("Runtime",  width=8,  justify="center")
-        table.add_column("CPU%",     width=6,  justify="center")
-        table.add_column("Thr",      width=4,  justify="center")
-        table.add_column("RSS",      width=7,  justify="center")
-        table.add_column("Virt",     width=7,  justify="center")
-        table.add_column("DRAM",     width=10, justify="center")
-        table.add_column("L1",       width=8,  justify="center")
-        table.add_column("L1 Small",    width=8,  justify="center")
-        table.add_column("Trace",    width=8,  justify="center")
-        table.add_column("CB",       width=8,  justify="center")
+        table.add_column("Dev",      style="cyan", no_wrap=True)
+        table.add_column("PID",      no_wrap=True, justify="center")
+        table.add_column("Process",  no_wrap=True)
+        table.add_column("Runtime",  no_wrap=True, justify="center")
+        table.add_column("CPU%",     no_wrap=True, justify="center")
+        table.add_column("Thr",      no_wrap=True, justify="center")
+        table.add_column("RSS",      no_wrap=True, justify="center")
+        table.add_column("Virt",     no_wrap=True, justify="center")
+        table.add_column("DRAM",     no_wrap=True, justify="center")
+        table.add_column("Trace",    no_wrap=True, justify="center")
+        table.add_column("L1",       no_wrap=True, justify="center")
+        table.add_column("L1 Small", no_wrap=True, justify="center")
+        table.add_column("CB",       no_wrap=True, justify="center")
 
         # Group processes by PID
         pid_groups = defaultdict(list)
@@ -705,9 +759,9 @@ class Dashboard:
                             Text(rss_cell.plain,  style=hl),
                             Text(virt_cell.plain, style=hl),
                             Text(format_bytes(proc["dram"]),     style=hl),
+                            Text(format_bytes(proc["trace"]),    style=hl),
                             Text(format_bytes(proc["l1"]),       style=hl),
                             Text(format_bytes(proc["l1_small"]), style=hl),
-                            Text(format_bytes(proc["trace"]),    style=hl),
                             Text(format_bytes(proc["cb"]),       style=hl),
                         )
                     else:
@@ -721,9 +775,9 @@ class Dashboard:
                             rss_cell,
                             Text(virt_cell.plain, style="dim"),
                             Text(format_bytes(proc["dram"]),     style="green" if proc["dram"]     > 0 else "dim"),
+                            Text(format_bytes(proc["trace"]),    style="green" if proc["trace"]    > 0 else "dim"),
                             Text(format_bytes(proc["l1"]),       style="green" if proc["l1"]       > 0 else "dim"),
                             Text(format_bytes(proc["l1_small"]), style="green" if proc["l1_small"] > 0 else "dim"),
-                            Text(format_bytes(proc["trace"]),    style="green" if proc["trace"]    > 0 else "dim"),
                             Text(format_bytes(proc["cb"]),       style="green" if proc["cb"]       > 0 else "dim"),
                         )
 
@@ -766,8 +820,50 @@ class Dashboard:
 
         return Group(*parts)
 
+    def _render_metric_picker(self, devices: List[Device], header) -> Layout:
+        """Render the metric picker overlay (replaces device grid while open)."""
+        gw = self._graph_window
+        selected = gw.selected_metrics
+
+        ref_hist = None
+        if devices:
+            ref_dev = devices[0]
+            ref_id = ref_dev.display_id if hasattr(ref_dev, "display_id") else str(ref_dev.chip_id)
+            ref_hist = gw.history.get(ref_id)
+
+        body = Text()
+        for idx, (key, attr, label, color, _cap_fn) in enumerate(AVAILABLE_METRICS):
+            checked = "x" if key in selected else " "
+            cur_str = "—"
+            if ref_hist is not None:
+                series = getattr(ref_hist, attr, None)
+                if series and len(series) > 0:
+                    cur_str = f"{series[-1]:.1f}"
+            cursor_marker = ">" if idx == self._picker_cursor else " "
+            line = f"{cursor_marker} [{checked}] {label:<12} {cur_str}"
+            style = "bold white on blue" if idx == self._picker_cursor else color
+            body.append(line, style=style)
+            if idx < len(AVAILABLE_METRICS) - 1:
+                body.append("\n")
+
+        panel = Panel(
+            body,
+            title="[cyan]Select metrics  (↑/↓  space=toggle  enter/esc/m=close)[/]",
+            border_style="cyan",
+        )
+
+        root = Layout()
+        root.split_column(
+            Layout(header, name="header", size=5),
+            Layout(panel, name="picker"),
+        )
+        return root
+
     def _render_graphs_tab(self, devices: List[Device], header) -> Layout:
         """Tab 4: live telemetry graphs (nvtop-style)."""
+        if self._show_metric_picker:
+            return self._render_metric_picker(devices, header)
+
         gw = self._graph_window
         num_devices = len(devices)
 
@@ -789,7 +885,7 @@ class Dashboard:
         panels = []
         for dev in devices:
             did = dev.display_id if hasattr(dev, "display_id") else str(dev.chip_id)
-            panels.append(gw.render_device_card(did, dev, chart_height, chart_width))
+            panels.append(gw.render_device_card(did, dev, chart_height, chart_width, card_width=available_width))
 
         root = Layout()
         root.split_column(
@@ -815,7 +911,7 @@ class Dashboard:
         """Render per-board ethernet connectivity summary."""
         table = Table(
             title="Ethernet Connectivity",
-            box=box.ROUNDED, show_header=True, header_style="bold",
+            box=_ui.get_box(), show_header=True, header_style="bold",
         )
         table.add_column("Board / ASIC", style="cyan", width=24)
         table.add_column("Arch", width=12)
@@ -884,7 +980,7 @@ class Dashboard:
 
         table = Table(
             title="Exit Links (off-host connections)",
-            box=box.ROUNDED, show_header=True, header_style="bold",
+            box=_ui.get_box(), show_header=True, header_style="bold",
         )
         table.add_column("Local Device", style="cyan")
         table.add_column("Local Ch", justify="right")
@@ -911,7 +1007,7 @@ class Dashboard:
         table = Table(
             title=f"Cluster Topology ({len(info['hosts'])} hosts, "
                   f"{info['total_cross_host_links']} cross-host links)",
-            box=box.ROUNDED, show_header=True, header_style="bold",
+            box=_ui.get_box(), show_header=True, header_style="bold",
         )
         table.add_column("Host", style="cyan")
         table.add_column("ASICs", justify="right", width=6)

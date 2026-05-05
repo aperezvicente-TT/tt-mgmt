@@ -6,6 +6,8 @@ from collections import defaultdict
 import click
 from rich.table import Table
 
+from tt_mgmt import ui
+
 from tt_mgmt.backend import device_backend
 
 
@@ -19,7 +21,7 @@ def _infer_board_type(arch: str, num_chips: int) -> str:
 
 @click.group()
 def device():
-    """Device management (list, info, reset, monitor)."""
+    """Device management (list, info)."""
     pass
 
 
@@ -61,7 +63,7 @@ def list(ctx, format, show_remote):
                 for d in group:
                     board_type_map[d['id']] = btype
 
-            table = Table(title="Tenstorrent Devices")
+            table = Table(title="Tenstorrent Devices", box=ui.get_box())
             table.add_column("Logical ID", style="bright_blue")
             table.add_column("Board", style="green")
             table.add_column("Display", style="dim")
@@ -139,30 +141,3 @@ def info(ctx, device_id, verbose):
         raise click.Abort()
 
 
-@device.command()
-@click.argument('device_id', type=int)
-@click.option('--force', is_flag=True, help='Force reset without confirmation')
-@click.pass_context
-def reset(ctx, device_id, force):
-    """Reset a Tenstorrent device (not implemented).
-    
-    DEVICE_ID: The device ID to reset
-    """
-    console = ctx.obj['console']
-    console.print("[yellow]Reset not implemented[/yellow]")
-
-
-@device.command()
-@click.argument('device_id', type=int)
-@click.option('--watch', is_flag=True, help='Continuously monitor')
-@click.option('--interval', type=float, default=1.0, help='Update interval in seconds')
-@click.pass_context
-def monitor(ctx, device_id, watch, interval):
-    """Monitor device telemetry in real-time (not implemented).
-    
-    DEVICE_ID: The device ID to monitor
-    
-    Use 'tt-mgmt smi monitor' for device monitoring.
-    """
-    console = ctx.obj['console']
-    console.print("[yellow]Monitor not implemented. Use 'tt-mgmt smi monitor'[/yellow]")

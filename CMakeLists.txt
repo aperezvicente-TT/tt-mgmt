@@ -58,6 +58,7 @@ nanobind_add_module(native
     cpp/src/providers/sysfs_discovery.cpp
     cpp/src/providers/sysfs_telemetry.cpp
     cpp/src/providers/fabric_manager_provider.cpp
+    cpp/src/providers/umd_noc_access.cpp
 )
 
 target_include_directories(native PRIVATE
@@ -65,7 +66,7 @@ target_include_directories(native PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/cpp/src
 )
 
-target_link_libraries(native PRIVATE device fmt::fmt-header-only)
+target_link_libraries(native PRIVATE tt-umd fmt::fmt-header-only)
 
 if(TT_MGMT_FABRIC_MANAGER)
     target_compile_definitions(native PRIVATE TT_MGMT_HAS_FABRIC_MANAGER)
@@ -84,4 +85,4 @@ set_target_properties(native PROPERTIES
 )
 
 install(TARGETS native LIBRARY DESTINATION tt_mgmt/backend/smi)
-install(FILES $<TARGET_FILE:device> DESTINATION tt_mgmt/backend/smi)
+install(FILES $<TARGET_FILE:tt-umd> $<TARGET_SONAME_FILE:tt-umd> DESTINATION tt_mgmt/backend/smi)

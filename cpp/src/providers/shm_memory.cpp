@@ -122,12 +122,14 @@ bool ShmMemoryProvider::update(DeviceInfo& dev) {
         process_map[proc.pid] = &proc;
     }
 
-    // Determine shm_asic_id for SHM lookup
-    uint64_t shm_asic_id = dev.asic_id;
+    // Determine legacy shm_asic_id for backward-compatible SHM lookup
+    // tt-metal v2 uses chip_unique_id (= dev.asic_id) directly as the SHM filename key.
+    // tt-metal v1 used composite (board_id << 8 | asic_location) stored in cache->shm_asic_id.
+    uint64_t shm_asic_id_legacy = 0;
     if (discovery_) {
         auto* cache = discovery_->get_cache(dev.asic_id);
         if (cache) {
-            shm_asic_id = cache->shm_asic_id;
+            shm_asic_id_legacy = cache->shm_asic_id;
         }
     }
 
@@ -140,15 +142,17 @@ bool ShmMemoryProvider::update(DeviceInfo& dev) {
         return shm_open(name.c_str(), O_RDONLY, 0666);
     };
 
-    int fd = try_shm_open(shm_asic_id);
-    if (fd < 0 && shm_asic_id != dev.asic_id) {
-        fd = try_shm_open(dev.asic_id);
+    // v2: try chip_unique_id first (new tt-metal uses this directly)
+    int fd = try_shm_open(dev.asic_id);
+    // Fallback: try legacy composite ID (old tt-metal used board_id << 8 | asic_location)
+    if (fd < 0 && shm_asic_id_legacy != 0 && shm_asic_id_legacy != dev.asic_id) {
+        fd = try_shm_open(shm_asic_id_legacy);
     }
     if (fd < 0) {
         if (std::getenv("TT_SMI_DEBUG")) {
             std::cerr << "[tt_mgmt] SHM not found for device " << dev.display_id
-                      << " (tried shm_asic_id=" << shm_asic_id
-                      << ", asic_id=" << dev.asic_id << ")" << std::endl;
+                      << " (tried asic_id=" << dev.asic_id
+                      << ", legacy_shm_id=" << shm_asic_id_legacy << ")" << std::endl;
         }
         return !dev.processes.empty();
     }

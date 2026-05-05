@@ -98,10 +98,18 @@ def parse_duration(s: str) -> float:
 
 
 def parse_interval(s: str) -> float:
-    """Parse an interval string (e.g. '500ms', '1s', '2.5s') to seconds."""
+    """Parse an interval string (e.g. '500ms', '1s', '2.5s') to seconds.
+
+    A bare number with no unit is treated as milliseconds (so ``-i 250`` means
+    250 ms).  Use an explicit unit (``s``/``m``/``h``/``d``) for anything else.
+    """
     s = s.strip().lower()
     if s.endswith("ms"):
         return float(s[:-2]) / 1000.0
+    try:
+        return float(s) / 1000.0
+    except ValueError:
+        pass
     return parse_duration(s)
 
 

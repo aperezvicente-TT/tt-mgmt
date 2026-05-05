@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 1s
+  evaluation_interval: 1s
+
+# NOTE: Start Prometheus with --storage.tsdb.min-block-duration=30s to
+# reduce the default 5-minute staleness window. This makes dead PID
+# metrics vanish from Grafana within ~30s instead of lingering for 5 min.
+#
+#   docker run -d --name prometheus --net=host \
+#     -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml \
+#     prom/prometheus \
+#     --config.file=/etc/prometheus/prometheus.yml \
+#     --storage.tsdb.min-block-duration=30s
+
+scrape_configs:
+  - job_name: "tenstorrent"
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["localhost:5391"]
+        labels:
+          host: "desktop"
+
+    # Multi-host: add one target per machine running tt-mgmtd
+    # static_configs:
+    #   - targets: ["host1:5391", "host2:5391", "host3:5391"]
+    #     labels:
+    #       cluster: "my-cluster"

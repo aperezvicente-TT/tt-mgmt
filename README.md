@@ -1,20 +1,33 @@
 # tt-mgmt
 
-Tenstorrent device management CLI — standalone build against
-[tt-umd](https://github.com/aperezvicente-TT/tt-umd) (no full
-`tt-metal` checkout required).
+Production-ready monitoring and diagnostics for Tenstorrent accelerators —
+standalone build against [tt-umd](https://github.com/aperezvicente-TT/tt-umd)
+(no full `tt-metal` checkout required).
+
+Five commands cover the full monitoring loop:
+
+| Command  | What it's for                                                    |
+|----------|------------------------------------------------------------------|
+| `smi`    | Live TUI dashboard — temperature, power, clocks, per-process mem |
+| `device` | Inventory: list devices, show full info per chip                 |
+| `doctor` | One-shot health check across host, drivers, devices, daemon      |
+| `record` | Sample telemetry to JSONL/CSV (workload profiling, post-mortem)  |
+| `plot`   | Render recorded sessions as interactive HTML or terminal summary |
+
+Plus a daemon (`tt-mgmtd`) that exposes the same telemetry as a Prometheus
+scrape target with a prebuilt Grafana dashboard, for fleet-wide monitoring.
 
 ## Features
 
-- Multi-architecture device discovery (Wormhole, Blackhole, Quasar)
-- Real-time telemetry: temperature, power, AICLK, voltage, current
+- Multi-architecture device discovery — Wormhole, Blackhole, Quasar; designed for **mixed BH+WH clusters**
+- Real-time telemetry: temperature, power, AICLK, voltage, current, fan
 - Per-process memory tracking (DRAM / L1 / L1-small / trace / CB) via shared memory
-- Live TUI dashboard with graph support (`smi monitor -w`)
+- Live TUI dashboard with graph support (`smi`)
 - Telemetry recording to JSONL/CSV and offline HTML plotting
-- Ethernet fabric topology and link status
-- Environment variable catalog and profile management
-- Interactive shell with tab completion
+- Live-polling HTML dashboard (`plot --live`)
+- Health-check command (`doctor`) with machine-readable output for CI/oncall
 - Dual backend: full UMD or lightweight sysfs-only (no native build needed)
+- **Daemon mode**: `tt-mgmtd` Prometheus exporter on `:5391`, systemd unit, prebuilt Grafana dashboard
 
 ## Quick start
 
@@ -22,7 +35,7 @@ Tenstorrent device management CLI — standalone build against
 git clone --recursive https://github.com/aperezvicente-TT/tt-mgmt.git
 cd tt-mgmt
 pip install -e .
-or
+# or:
 uv pip install -e .
 
 # Enable tab completion (current session)
@@ -34,69 +47,102 @@ source ./setup_completion.sh
 
 ## Commands
 
-### `smi` — System Management Interface
+### `smi` — Live system management interface
+
+Real-time TUI dashboard: telemetry, clocks, memory, per-process allocations.
+The single command you run on a host to *see what the chips are doing right now*.
 
 ```bash
-tt-mgmt smi monitor              # One-shot device overview
-tt-mgmt smi monitor -w           # Live dashboard (watch mode)
-tt-mgmt smi monitor -w -r 200    # Live dashboard, 200ms refresh
-tt-mgmt smi monitor --json       # JSON output
-tt-mgmt smi telemetry            # Temperature, power, clock per device
-tt-mgmt smi memory               # DRAM/L1 utilization per device
-tt-mgmt smi processes            # Processes using TT devices
-tt-mgmt smi cleanup              # Remove stale shared-memory entries
+tt-mgmt smi                      # Live TUI dashboard (Ctrl-C to exit)
+tt-mgmt smi -i 200ms             # Faster refresh (default 1s)
+tt-mgmt smi -g                   # Start on the Graphs tab
+tt-mgmt smi status               # One-shot snapshot (no TUI)
+tt-mgmt smi status --json        # Machine-readable snapshot for scripts
+tt-mgmt smi cleanup              # Remove stale /dev/shm entries
 ```
 
-### `device` — Device management
+### `device` — Inventory
+
+Enumerate devices and inspect static/dynamic info per chip. Useful for asset
+tracking, board-id correlation, and confirming `TT_VISIBLE_DEVICES` filtering.
 
 ```bash
 tt-mgmt device list              # List all devices (local + remote)
 tt-mgmt device list --format json
-tt-mgmt device info 0            # Detailed info for device 0
+tt-mgmt device info 0            # Full info for device 0
 ```
 
+### `doctor` — Health check
 
-### `fabric` — Ethernet fabric topology
+One-shot validation of host, drivers, hugepages, devices, and daemon state.
+Designed for CI gates and oncall — exits non-zero on errors so you can wire it
+into deployment pipelines.
 
 ```bash
-tt-mgmt fabric status            # Link summary (active/idle/exit)
-tt-mgmt fabric links             # Per-device ethernet link table
-tt-mgmt fabric topology          # Board-grouped connectivity view
-tt-mgmt fabric cluster           # Multi-host cluster (needs fabric manager)
+tt-mgmt doctor                   # Human-readable check report
+tt-mgmt doctor --verbose         # Show details for every check
+tt-mgmt doctor --json            # Machine-readable for CI / monitoring
 ```
 
-### `record` — Telemetry recording
+Exit codes: `0` all pass, `1` any error, `2` warnings only.
+
+### `record` — Telemetry capture
+
+Sample telemetry, memory, and per-process metrics to JSONL or CSV.
+Use during workload runs for post-mortem analysis or longitudinal profiling.
 
 ```bash
-tt-mgmt record -o session.jsonl                  # Record until Ctrl-C
-tt-mgmt record -i 500ms -d 5m -o run.jsonl       # 500ms samples for 5 min
-tt-mgmt record --pid 1234 -o trace.jsonl         # Track specific PID
-tt-mgmt record --exclude-name tt-mgmt -o run.jsonl # Skip processes by name
-tt-mgmt record --exclude-pid 5678 -o run.jsonl   # Skip specific PIDs
-tt-mgmt record --per-pid-files -o run.jsonl       # Separate file per PID
-tt-mgmt record --all-groups -o full.jsonl         # All metric groups
-tt-mgmt record --groups telemetry,memory -o t.jsonl  # Select metric groups
-tt-mgmt record --csv -o metrics.csv               # CSV output
-tt-mgmt record --max-size 100M -o big.jsonl       # Rotate at 100MB
+tt-mgmt record -o session.jsonl                       # Until Ctrl-C
+tt-mgmt record -i 500ms -d 5m -o run.jsonl            # 500ms samples, 5 min
+tt-mgmt record -i 250 -o run.jsonl                    # Bare numbers = ms
+tt-mgmt record --pid 1234 -o trace.jsonl              # Track a specific PID
+tt-mgmt record --exclude-name tt-mgmt -o run.jsonl    # Skip tt-mgmt processes
+tt-mgmt record --per-pid-files -o run.jsonl           # Separate file per PID
+tt-mgmt record --all-groups -o full.jsonl             # Every metric group
+tt-mgmt record --groups telemetry,memory -o t.jsonl   # Select groups
+tt-mgmt record --csv -o metrics.csv                   # CSV (for pandas)
+tt-mgmt record --max-size 100M -o big.jsonl           # Rotate at 100MB
 ```
 
-### `plot` — Offline plotting
+Metric groups: `device`, `telemetry`, `memory`, `process`, `process_alloc`,
+`gddr`, `fabric`, `firmware`. Default: everything except `gddr`/`fabric`/`firmware`.
+
+### `plot` — Offline visualization
+
+Turn recorded sessions into interactive HTML reports, or stream a live
+auto-refreshing dashboard against a running daemon.
 
 ```bash
-tt-mgmt plot session.jsonl                     # Generate interactive HTML
-tt-mgmt plot session.jsonl -t                  # Terminal summary table
+tt-mgmt plot session.jsonl                     # Interactive HTML report
+tt-mgmt plot session.jsonl -t                  # Terminal summary tables
+tt-mgmt plot session_<pid>.jsonl               # Per-PID file from --per-pid-files
 tt-mgmt plot --live                            # Live-polling HTML dashboard
 ```
 
+## Daemon mode (Prometheus + Grafana)
 
-
-### Interactive mode
+`tt-mgmtd` exposes telemetry as a Prometheus scrape target on `:5391`.
 
 ```bash
-tt-mgmt                          # Launches interactive shell
+# Install systemd unit
+sudo cp systemd/tt-mgmtd.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now tt-mgmtd
+
+# Or run manually
+tt-mgmtd --backend=auto
+
+# Point Prometheus at it (see prometheus.yml for a working example)
+docker run -d --name prometheus --net=host \
+  -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml \
+  prom/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.min-block-duration=30s
+
+# Import grafana-dashboard.json into Grafana for the prebuilt view.
 ```
 
-All commands are available inside the shell with tab completion.
+`prometheus.yml` defaults to a single `localhost:5391` target; uncomment the `Multi-host` block for cluster-wide scraping.
 
 ## Backend selection
 
@@ -159,6 +205,22 @@ The C++ layer (`cpp/`) uses tt-umd directly for device discovery and telemetry:
 
 The Python layer communicates with the native extension via nanobind bindings
 (`cpp/bindings/native.cpp`).
+
+### Mixed-architecture clusters (BH + WH)
+
+UMD's `TopologyDiscovery::discover()` validates board topology globally and aborts on mixed
+architectures (`cluster_descriptor.cpp:1317` throws `Chips with differing architectures
+detected`). Until that lands upstream, `tt-mgmt` ships two paths:
+
+- **Production**: single `discover()` call combined with a `TT_VISIBLE_DEVICES` filter so only
+  one architecture's devices participate in any given discovery. See `MULTI_ARCH_DISCOVERY.md`.
+- **Patches** (`UMD_MULTI_ARCH.patch`, `UMD_PATCH_MIXED_ARCH.md`) — drop-in fixes for the
+  bundled `third_party/tt-umd` submodule that lift the homogeneity check.
+- **Proposed rearchitecture** (`UMD_MULTI_ARCH_REARCHITECTURE.md`) — per-architecture cluster
+  isolation so each arch is discovered into its own descriptor; needs upstream UMD changes
+  because `BlackholeTTDevice`/`WormholeTTDevice` constructors are `protected`.
+
+See `BUILD_INSTRUCTIONS.md` for build details and `SCRIPTS.md` for the install scripts reference.
 
 ## License
 
