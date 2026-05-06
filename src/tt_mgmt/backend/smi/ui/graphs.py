@@ -21,7 +21,7 @@ from rich import box
 
 
 def _cap_temp(arch, dev=None):    return 80.0
-def _cap_power(arch, dev=None):   return 300.0 if "Blackhole" in arch else 100.0
+def _cap_power(arch, dev=None):   return 170.0 if "Blackhole" in arch else 100.0
 def _cap_voltage(arch, dev=None): return 1.2
 def _cap_current(arch, dev=None): return 250.0 if "Blackhole" in arch else 130.0
 def _cap_aiclk(arch, dev=None):   return 1500.0 if "Blackhole" in arch else 1000.0
@@ -29,13 +29,13 @@ def _cap_pct(arch, dev=None):     return 100.0
 
 
 def _cap_input_power(arch, dev=None):
-    """Board input power ceiling. P150 ~350W, P300 ~600W; ignored for non-BH."""
+    """Board input power ceiling. P150 ~400W, P300 ~600W; ignored for non-BH."""
     if "Blackhole" not in arch:
         return 100.0
     ct = (getattr(dev, "card_type", "") or "").lower()
     if "p300" in ct:
         return 600.0
-    return 350.0
+    return 400.0
 
 
 AVAILABLE_METRICS = [
