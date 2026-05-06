@@ -21,7 +21,7 @@ from rich import box
 
 
 def _cap_temp(arch, dev=None):    return 80.0
-def _cap_power(arch, dev=None):   return 170.0 if "Blackhole" in arch else 100.0
+def _cap_power(arch, dev=None):   return 180.0 if "Blackhole" in arch else 100.0
 def _cap_voltage(arch, dev=None): return 1.2
 def _cap_current(arch, dev=None): return 250.0 if "Blackhole" in arch else 130.0
 def _cap_aiclk(arch, dev=None):   return 1500.0 if "Blackhole" in arch else 1000.0
