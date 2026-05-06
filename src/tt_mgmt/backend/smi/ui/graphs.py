@@ -240,28 +240,33 @@ def render_combined_graph(metrics: List[tuple], width: int = 60, height: int = 1
 
         series.append((grid, color, order))
 
+    # Each cell shows dots from a single series so colors never blend.
+    # When multiple series have dots in the same cell, the one with the most
+    # dots wins (ties broken by draw order — earlier series win).
     out_cells = [[(" ", "white") for _ in range(width)] for _ in range(height)]
     for cy in range(height):
         for cx in range(width):
-            mask = 0
-            contributors = []
             base_y = cy * 4
             base_x = cx * 2
+            best_mask = 0
+            best_color = None
+            best_count = 0
+            best_order = 0
             for grid, color, order in series:
                 series_mask = 0
                 for (dx, dy, bit) in _CELL_BITS:
                     if grid[base_y + dy][base_x + dx]:
                         series_mask |= bit
-                if series_mask:
-                    mask |= series_mask
-                    contributors.append((order, color))
-            if mask:
-                if len(contributors) == 1:
-                    chosen = contributors[0][1]
-                else:
-                    contributors.sort()
-                    chosen = contributors[cx % len(contributors)][1]
-                out_cells[cy][cx] = (chr(0x2800 + mask), chosen)
+                if not series_mask:
+                    continue
+                count = bin(series_mask).count("1")
+                if best_color is None or count > best_count or (count == best_count and order < best_order):
+                    best_mask = series_mask
+                    best_color = color
+                    best_count = count
+                    best_order = order
+            if best_color is not None:
+                out_cells[cy][cx] = (chr(0x2800 + best_mask), best_color)
 
     # --- Build Rich Text output ---
     result = Text()
