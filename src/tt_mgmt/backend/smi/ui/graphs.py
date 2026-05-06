@@ -20,27 +20,38 @@ from rich.text import Text
 from rich import box
 
 
-def _cap_temp(arch):    return 80.0
-def _cap_power(arch):   return 300.0 if "Blackhole" in arch else 100.0
-def _cap_voltage(arch): return 1.2
-def _cap_current(arch): return 250.0 if "Blackhole" in arch else 130.0
-def _cap_aiclk(arch):   return 1500.0 if "Blackhole" in arch else 1000.0
-def _cap_pct(arch):     return 100.0
+def _cap_temp(arch, dev=None):    return 80.0
+def _cap_power(arch, dev=None):   return 300.0 if "Blackhole" in arch else 100.0
+def _cap_voltage(arch, dev=None): return 1.2
+def _cap_current(arch, dev=None): return 250.0 if "Blackhole" in arch else 130.0
+def _cap_aiclk(arch, dev=None):   return 1500.0 if "Blackhole" in arch else 1000.0
+def _cap_pct(arch, dev=None):     return 100.0
+
+
+def _cap_input_power(arch, dev=None):
+    """Board input power ceiling. P150 ~350W, P300 ~600W; ignored for non-BH."""
+    if "Blackhole" not in arch:
+        return 100.0
+    ct = (getattr(dev, "card_type", "") or "").lower()
+    if "p300" in ct:
+        return 600.0
+    return 350.0
 
 
 AVAILABLE_METRICS = [
-    ("temp",        "temperature",        "Temp °C",    "red",              _cap_temp),
-    ("board_temp",  "board_temperature",  "Board °C",   "bright_red",       _cap_temp),
-    ("vreg_temp",   "vreg_temperature",   "VReg °C",    "bright_magenta",   _cap_temp),
-    ("power",       "power",              "Power W",    "yellow",           _cap_power),
-    ("voltage",     "voltage",            "VCORE V",    "blue",             _cap_voltage),
-    ("current",     "current",            "TDC A",      "magenta",          _cap_current),
-    ("aiclk",       "aiclk",              "AICLK MHz",  "bright_blue",      _cap_aiclk),
-    ("dram",        "dram_pct",           "DRAM %",     "cyan",             _cap_pct),
-    ("l1",          "l1_pct",             "L1 %",       "green",            _cap_pct),
-    ("l1_small",    "l1_small_pct",       "L1sm %",     "bright_green",     _cap_pct),
-    ("trace",       "trace_pct",          "Trace %",    "bright_yellow",    _cap_pct),
-    ("cb",          "cb_pct",             "CB %",       "white",            _cap_pct),
+    ("temp",        "temperature",        "Temp °C",    "red",              _cap_temp,    False),
+    ("board_temp",  "board_temperature",  "Board °C",   "bright_red",       _cap_temp,    False),
+    ("vreg_temp",   "vreg_temperature",   "VReg °C",    "bright_magenta",   _cap_temp,    False),
+    ("power",       "power",              "TDP W",      "yellow",           _cap_power,   False),
+    ("input_power", "input_power",        "In Pwr W",   "bright_yellow",    _cap_input_power, True),
+    ("voltage",     "voltage",            "VCORE V",    "blue",             _cap_voltage, False),
+    ("current",     "current",            "TDC A",      "magenta",          _cap_current, False),
+    ("aiclk",       "aiclk",              "AICLK MHz",  "bright_blue",      _cap_aiclk,   False),
+    ("dram",        "dram_pct",           "DRAM %",     "cyan",             _cap_pct,     False),
+    ("l1",          "l1_pct",             "L1 %",       "green",            _cap_pct,     False),
+    ("l1_small",    "l1_small_pct",       "L1sm %",     "bright_green",     _cap_pct,     False),
+    ("trace",       "trace_pct",          "Trace %",    "bright_yellow",    _cap_pct,     False),
+    ("cb",          "cb_pct",             "CB %",       "white",            _cap_pct,     False),
 ]
 DEFAULT_SELECTED = {"temp", "power", "dram", "l1"}
 VALID_METRIC_KEYS = {m[0] for m in AVAILABLE_METRICS}
@@ -86,6 +97,7 @@ class TelemetryHistory:
         self.board_temperature: Deque[float] = deque(maxlen=max_points) # Board °C
         self.vreg_temperature: Deque[float] = deque(maxlen=max_points)  # VReg °C
         self.power: Deque[float] = deque(maxlen=max_points)
+        self.input_power: Deque[float] = deque(maxlen=max_points)       # Board input power (BH only)
         self.voltage: Deque[float] = deque(maxlen=max_points)           # VCORE V
         self.current: Deque[float] = deque(maxlen=max_points)           # TDC A
         self.aiclk: Deque[int] = deque(maxlen=max_points)
@@ -112,6 +124,7 @@ class TelemetryHistory:
 
         # Power
         self.power.append(_safe(device, "power"))
+        self.input_power.append(_safe(device, "input_power_w"))
 
         # VCORE (mV → V)
         vcore_mv = _safe(device, "voltage_mv")
@@ -425,13 +438,16 @@ class GraphWindow:
 
         metrics = []
         arch = getattr(device, "arch_name", "")
-        for key, attr, label, color, cap_fn in AVAILABLE_METRICS:
+        is_bh = "Blackhole" in arch
+        for key, attr, label, color, cap_fn, bh_only in AVAILABLE_METRICS:
             if key not in self.selected_metrics:
+                continue
+            if bh_only and not is_bh:
                 continue
             series = list(getattr(hist, attr))
             if not series:
                 continue
-            cap = cap_fn(arch)
+            cap = cap_fn(arch, device)
             current_val = series[-1]
             metrics.append((series, cap, label, color, current_val))
 

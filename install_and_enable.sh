@@ -8,6 +8,8 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Install
+pip install --upgrade -q "pip>=23.1"
+
 pip install -e . -q
 
 if [ $? -eq 0 ]; then
