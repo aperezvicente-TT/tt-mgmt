@@ -826,13 +826,16 @@ class Dashboard:
         selected = gw.selected_metrics
 
         ref_hist = None
+        ref_arch = ""
+        any_bh = any("Blackhole" in getattr(d, "arch_name", "") for d in devices)
         if devices:
             ref_dev = devices[0]
             ref_id = ref_dev.display_id if hasattr(ref_dev, "display_id") else str(ref_dev.chip_id)
             ref_hist = gw.history.get(ref_id)
+            ref_arch = getattr(ref_dev, "arch_name", "")
 
         body = Text()
-        for idx, (key, attr, label, color, _cap_fn) in enumerate(AVAILABLE_METRICS):
+        for idx, (key, attr, label, color, _cap_fn, bh_only) in enumerate(AVAILABLE_METRICS):
             checked = "x" if key in selected else " "
             cur_str = "—"
             if ref_hist is not None:
@@ -840,8 +843,15 @@ class Dashboard:
                 if series and len(series) > 0:
                     cur_str = f"{series[-1]:.1f}"
             cursor_marker = ">" if idx == self._picker_cursor else " "
-            line = f"{cursor_marker} [{checked}] {label:<12} {cur_str}"
-            style = "bold white on blue" if idx == self._picker_cursor else color
+            suffix = "  (BH only)" if bh_only else ""
+            line = f"{cursor_marker} [{checked}] {label:<12} {cur_str}{suffix}"
+            disabled = bh_only and not any_bh
+            if idx == self._picker_cursor:
+                style = "bold white on blue"
+            elif disabled:
+                style = "dim"
+            else:
+                style = color
             body.append(line, style=style)
             if idx < len(AVAILABLE_METRICS) - 1:
                 body.append("\n")
