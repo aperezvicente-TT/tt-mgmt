@@ -47,6 +47,23 @@ def format_runtime(seconds):
         return f"{days}d{hours:02d}h"
 
 
+def _compact_ranges(values) -> str:
+    """Collapse sorted integers into range notation, e.g. [0,1,2,3,4,7,8,9] -> '0-4,7-9'."""
+    nums = sorted(set(int(v) for v in values))
+    if not nums:
+        return ""
+    parts = []
+    start = prev = nums[0]
+    for n in nums[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        parts.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = n
+    parts.append(str(start) if start == prev else f"{start}-{prev}")
+    return ",".join(parts)
+
+
 class Dashboard:
     """Live dashboard using Rich library."""
 
@@ -705,7 +722,7 @@ class Dashboard:
                 lids = sorted(
                     d.logical_id for d, _ in devices_for_pid if d.logical_id >= 0
                 )
-                dev_info = f"LID {','.join(str(l) for l in lids)}" if lids else f"All ({len(devices_for_pid)})"
+                dev_info = f"LID {_compact_ranges(lids)}" if lids else f"All ({len(devices_for_pid)})"
                 runtime_str = format_runtime(proc.get("runtime", 0))
                 cpu_str    = f"{proc.get('cpu_percent', 0.0):.1f}"
                 thr_str    = str(proc.get("num_threads", 0)) if proc.get("num_threads") else "-"
