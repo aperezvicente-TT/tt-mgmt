@@ -24,6 +24,7 @@ _WH_ETH_LOCATIONS = [
 # Cached harvesting mask and tt_umd device (lazy init, only created once)
 _cached_harvest_mask = None
 _cached_umd_device = None
+_cached_umd_devs = None      # full {chip_id: TTDevice} map from discover()
 _cached_arch = None
 
 
@@ -33,14 +34,11 @@ def _get_dm():
     return _get_manager()
 
 
-def _get_umd_device():
-    """Get tt_umd TTDevice — only used for harvesting mask and ELF loading.
-
-    Reuses the cached instance to avoid opening the device twice.
-    """
-    global _cached_umd_device
-    if _cached_umd_device is not None:
-        return _cached_umd_device
+def _discover_umd_devs():
+    """Discover and cache the full {chip_id: TTDevice} map (one discover() call)."""
+    global _cached_umd_devs
+    if _cached_umd_devs is not None:
+        return _cached_umd_devs
 
     import tt_umd
     opts = tt_umd.TopologyDiscoveryOptions()
@@ -59,7 +57,28 @@ def _get_umd_device():
         _, devs = tt_umd.TopologyDiscovery.discover(opts, tt_umd.IODeviceType.PCIe)
     except TypeError:
         _, devs = tt_umd.TopologyDiscovery.discover(opts)
+    _cached_umd_devs = devs
+    return devs
 
+
+def _get_umd_device(chip_id=None):
+    """Get a tt_umd TTDevice — used for harvesting mask and ELF loading.
+
+    With chip_id=None returns the first local device (backwards compatible).
+    With chip_id set, returns that specific chip (raises if not present).
+    """
+    global _cached_umd_device
+    devs = _discover_umd_devs()
+
+    if chip_id is not None:
+        if chip_id not in devs:
+            import click
+            raise click.ClickException(
+                f"chip-id {chip_id} not found; available: {sorted(devs.keys())}")
+        return devs[chip_id]
+
+    if _cached_umd_device is not None:
+        return _cached_umd_device
     for d in devs.values():
         if not d.is_remote():
             _cached_umd_device = d
@@ -202,6 +221,35 @@ def _get_eth_cores():
     return []
 
 
+def _get_eth_cores_umd(device):
+    """ETH cores for a specific tt_umd device, derived from its own harvest mask.
+
+    Uses ONLY the passed umd device (no DeviceManager). This matters for the
+    load path, which already holds a umd device: opening a second provider
+    (DeviceManager) on the same PCIe device bus-faults Blackhole.
+    """
+    arch = ""
+    try:
+        arch = str(device.get_arch()).lower()
+    except Exception:
+        pass
+    if "wormhole" in arch:
+        return sorted(_WH_ETH_LOCATIONS)
+
+    # Blackhole: 14 ETH channels, filter out harvested ones.
+    mask = 0
+    try:
+        mask = device.get_chip_info().harvesting_masks.eth_harvesting_mask
+    except Exception:
+        mask = 0
+    cores = []
+    for ch, x in enumerate(_BH_ETH_CHANNEL_TO_NOC_X):
+        if mask & (1 << ch):
+            continue
+        cores.append((x, 1))
+    return sorted(cores)
+
+
 def _read_boot_results(noc_x, noc_y, chip_id=0, arch=None):
     """Read and parse boot_results from an ERISC core.
 
@@ -279,6 +327,23 @@ def _print_status(status):
     click.echo("\n".join(lines))
 
 
+def _is_harvested_err(err):
+    """True if a NOC read failed because the core is harvested / untranslatable."""
+    s = str(err).lower()
+    return "no translation" in s or "harvested" in s
+
+
+def _peek_one(noc_x, noc_y, chip_id=0):
+    """Read+print one core, skipping harvested/invalid cores instead of crashing."""
+    try:
+        _print_status(_read_boot_results(noc_x, noc_y, chip_id=chip_id))
+    except Exception as err:
+        if _is_harvested_err(err):
+            click.echo(f"({noc_x},{noc_y})\n  -> skipped (harvested / no NOC translation)")
+        else:
+            click.echo(f"({noc_x},{noc_y})\n  -> ERROR: {err}")
+
+
 # ---------------------------------------------------------------------------
 # CLI commands
 # ---------------------------------------------------------------------------
@@ -296,9 +361,11 @@ def erisc():
 @erisc.command()
 @click.argument("locations", nargs=-1)
 @click.option("--all", "-a", "all_cores", is_flag=True, help="All ETH cores.")
+@click.option("--chip-id", "-c", type=int, default=0,
+              help="Target chip id (from `tt-mgmt erisc list`). Default: 0.")
 @click.option("--watch", "-w", is_flag=False, flag_value=1.0, default=None, type=float,
               help="Watch mode: refresh every N seconds (default 1).")
-def peek(locations, all_cores, watch):
+def peek(locations, all_cores, chip_id, watch):
     """Read ERISC boot_results at NOC coordinate(s).
 
     \b
@@ -306,6 +373,7 @@ def peek(locations, all_cores, watch):
       tt-mgmt erisc peek 4-1
       tt-mgmt erisc peek eth0 eth1 eth5
       tt-mgmt erisc peek --all
+      tt-mgmt erisc peek --chip-id 2 3-1 13-1
       tt-mgmt erisc peek 4-1 --watch
     """
     coords = _resolve_locations(locations, all_cores)
@@ -317,7 +385,7 @@ def peek(locations, all_cores, watch):
             while True:
                 sys.stdout.write("\033[H")
                 for noc_x, noc_y in coords:
-                    _print_status(_read_boot_results(noc_x, noc_y))
+                    _peek_one(noc_x, noc_y, chip_id)
                 sys.stdout.write("\033[J")
                 sys.stdout.flush()
                 time.sleep(watch)
@@ -328,7 +396,7 @@ def peek(locations, all_cores, watch):
             sys.stdout.flush()
     else:
         for noc_x, noc_y in coords:
-            _print_status(_read_boot_results(noc_x, noc_y))
+            _peek_one(noc_x, noc_y, chip_id)
 
 
 @erisc.command("read")
@@ -388,9 +456,11 @@ _DIAG_LABELS = {
 @erisc.command()
 @click.argument("locations", nargs=-1)
 @click.option("--all", "-a", "all_cores", is_flag=True, help="All ETH cores.")
+@click.option("--chip-id", "-c", type=int, default=None,
+              help="Target chip id (from `tt-mgmt erisc list`). Default: first local device.")
 @click.option("--count", "-n", default=16, type=int,
               help="Number of scratchpad entries to read (default 16).")
-def diag(locations, all_cores, count):
+def diag(locations, all_cores, chip_id, count):
     """Read SerDes diagnostic scratchpad from ERISC core(s).
 
     \b
@@ -402,10 +472,11 @@ def diag(locations, all_cores, count):
       tt-mgmt erisc diag 3-1
       tt-mgmt erisc diag eth0 eth1
       tt-mgmt erisc diag --all
+      tt-mgmt erisc diag --chip-id 2 3-1 13-1
       tt-mgmt erisc diag 13-1 -n 20
     """
     coords = _resolve_locations(locations, all_cores)
-    device = _get_umd_device()
+    device = _get_umd_device(chip_id)
     if device is None:
         raise click.ClickException("No device found")
 
@@ -413,7 +484,14 @@ def diag(locations, all_cores, count):
         if idx > 0:
             click.echo()
         base = _BH_DIAG_SCRATCHPAD_BASE
-        data = device.noc_read(noc_x, noc_y, base, count * 4)
+        try:
+            data = device.noc_read(noc_x, noc_y, base, count * 4)
+        except Exception as err:
+            if _is_harvested_err(err):
+                click.echo(f"SerDes diagnostic scratchpad ({noc_x},{noc_y})  -> skipped (harvested / no NOC translation)")
+            else:
+                click.echo(f"SerDes diagnostic scratchpad ({noc_x},{noc_y})  -> ERROR: {err}")
+            continue
 
         click.echo(f"SerDes diagnostic scratchpad ({noc_x},{noc_y})  [{count} entries from 0x{base:05X}]")
         click.echo("-" * 64)
@@ -499,9 +577,11 @@ def _load_erisc_fw(device, noc_x, noc_y, elf_path, verify=True, run=True):
 @click.argument("elf_path", type=click.Path(exists=True))
 @click.argument("locations", nargs=-1)
 @click.option("--all", "-a", "all_cores", is_flag=True, help="Load onto all ETH cores.")
+@click.option("--chip-id", "-c", type=int, default=None,
+              help="Target BH/WH chip id (from `tt-mgmt erisc list`). Default: first local device.")
 @click.option("--no-run", is_flag=True, help="Load but don't start (keep core in reset).")
 @click.option("--no-verify", is_flag=True, help="Skip read-back verification.")
-def load_cmd(elf_path, locations, all_cores, no_run, no_verify):
+def load_cmd(elf_path, locations, all_cores, chip_id, no_run, no_verify):
     """Load ERISC firmware ELF onto ETH core(s).
 
     \b
@@ -509,12 +589,24 @@ def load_cmd(elf_path, locations, all_cores, no_run, no_verify):
       tt-mgmt erisc load fw.elf 4-1
       tt-mgmt erisc load fw.elf 3-1 13-1 10-1 11-1
       tt-mgmt erisc load fw.elf eth0 eth1
+      tt-mgmt erisc load fw.elf --chip-id 2 3-1 13-1
       tt-mgmt erisc load fw.elf --all
     """
-    coords = _resolve_locations(locations, all_cores)
-    device = _get_umd_device()
+    device = _get_umd_device(chip_id)
     if device is None:
         raise click.ClickException("No device found")
+    if chip_id is not None:
+        click.echo(f"Targeting chip-id {chip_id} (remote={device.is_remote()})")
+
+    if all_cores:
+        # Resolve cores from the SAME umd device we load with. Do NOT use the
+        # DeviceManager path (_resolve_locations/--all): a second provider on the
+        # same PCIe device bus-faults Blackhole.
+        coords = _get_eth_cores_umd(device)
+        if not coords:
+            raise click.ClickException("No ETH cores found on device.")
+    else:
+        coords = _resolve_locations(locations, all_cores=False)
 
     for noc_x, noc_y in coords:
         click.echo(f"Loading {elf_path} onto ({noc_x},{noc_y})...")
