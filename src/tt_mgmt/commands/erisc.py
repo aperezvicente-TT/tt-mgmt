@@ -403,18 +403,21 @@ def peek(locations, all_cores, chip_id, watch):
 @click.argument("location")
 @click.argument("addr", type=str)
 @click.option("--size", "-s", default=4, type=int, help="Bytes to read (default 4).")
-def read_cmd(location, addr, size):
+@click.option("--chip-id", "-c", type=int, default=None,
+              help="Target chip id (from `tt-mgmt erisc list`). Default: first local device.")
+def read_cmd(location, addr, size, chip_id):
     """Raw NOC memory read at a core coordinate.
 
     \b
     Examples:
       tt-mgmt erisc read 4-1 0x7CC00
       tt-mgmt erisc read eth0 0x7CC00 --size 128
+      tt-mgmt erisc read --chip-id 2 13-1 0x7D400 --size 64
     """
     noc_x, noc_y = _parse_noc_coord(location)
     address = int(addr, 0)
 
-    device = _get_umd_device()
+    device = _get_umd_device(chip_id)
     if device is None:
         raise click.ClickException("No device found")
     data = device.noc_read(noc_x, noc_y, address, size)
