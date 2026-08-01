@@ -278,6 +278,53 @@ Using `TT_VISIBLE_DEVICES` leverages existing filtering mechanism with zero risk
 4. **Document** any architecture-specific quirks discovered during testing
 5. **Propose upstream** to tt-umd repository
 
+---
+
+## Addendum: Per-Device Power-Aware Open (Blackhole idle power)
+
+### MODIFIED: pci_device.cpp
+**Location:** `device/pcie/pci_device.cpp`
+
+Same class of bug as the rest of this patch: a global "the host has one
+architecture" assumption. `open_pci_device()` decided whether to pass `O_APPEND`
+using `PCIDevice::get_pcie_arch()`, which returns the arch of the *lowest KMD
+index* (`enumerate_devices_info().begin()`) and caches it in a function-local
+static for the whole process.
+
+On a mixed host where `/dev/tenstorrent/0` is not a Blackhole, every device --
+including the Blackholes -- was opened without `O_APPEND`. That is the KMD's
+*legacy* power mode: `tt_cdev_open()` seeds the fd with
+`TT_POWER_FLAG_ALL & ~TT_POWER_FLAG_MAX_AI_CLK` and immediately sends ARC message
+`0x21 POWER_SETTING`, so the SMC ungates Tensix clocks, wakes the GDDR/MRISC PHYs
+and enables all four L2CPU clocks. The chip leaves its idle state for the whole
+lifetime of the process, even though tt-mgmt sets `low_power = true` and never
+issues `TENSTORRENT_IOCTL_SET_POWER_STATE`.
+
+Measured on a 1x P150A + 2x N300 host: Blackhole idle 20 W -> 38 W while any
+UMD-based process was running, back to 20 W on close.
+
+```diff
+-static int open_pci_device(const std::string &device_path) {
++static int open_pci_device(const std::string &device_path, int device_number) {
+     int flags = O_RDWR | O_CLOEXEC;
+-    if (PCIDevice::read_kmd_version() >= KMD_POWER_STATE && PCIDevice::get_pcie_arch() == tt::ARCH::BLACKHOLE) {
++    std::map<int, PciDeviceInfo> device_infos = PCIDevice::enumerate_devices_info();
++    auto device_info = device_infos.find(device_number);
++    bool is_blackhole = device_info != device_infos.end() && device_info->second.get_arch() == tt::ARCH::BLACKHOLE;
++    if (PCIDevice::read_kmd_version() >= KMD_POWER_STATE && is_blackhole) {
+         flags |= O_APPEND;
+```
+
+Both call sites are updated: the `PCIDevice` constructor (safe -- `pci_device_num`
+is declared before `pci_device_file_desc`, so it is initialized first) and
+`PCIDevice::read_command_byte()`.
+
+Homogeneous hosts are unaffected: BH-only hosts already took the `O_APPEND` path,
+and non-BH hosts already took the legacy path. Only mixed hosts change behavior.
+
+**Related:** `PCIDevice::get_pcie_arch()` is still a single-arch answer applied
+process-wide; other callers should be audited for the same assumption.
+
 ## Related Documentation
 
 - `MULTI_ARCH_DISCOVERY.md` - Original problem analysis
