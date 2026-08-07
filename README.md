@@ -4,7 +4,7 @@ Production-ready monitoring and diagnostics for Tenstorrent accelerators —
 standalone build against [tt-umd](https://github.com/aperezvicente-TT/tt-umd)
 (no full `tt-metal` checkout required).
 
-Five commands cover the full monitoring loop:
+Six commands cover the full monitoring loop:
 
 | Command  | What it's for                                                    |
 |----------|------------------------------------------------------------------|
@@ -13,6 +13,7 @@ Five commands cover the full monitoring loop:
 | `doctor` | One-shot health check across host, drivers, devices, daemon      |
 | `record` | Sample telemetry to JSONL/CSV (workload profiling, post-mortem)  |
 | `plot`   | Render recorded sessions as interactive HTML or terminal summary |
+| `fan`    | Read fan state and force a board's fan duty cycle (Wormhole)     |
 
 Plus a daemon (`tt-mgmtd`) that exposes the same telemetry as a Prometheus
 scrape target with a prebuilt Grafana dashboard, for fleet-wide monitoring.
@@ -158,7 +159,11 @@ Or set `TT_MGMT_BACKEND=sysfs` in your environment.
 
 - Python 3.9+
 - C++20 compiler (GCC 11+ / Clang 14+)
-- CMake 3.16+
+- CMake 3.25+ (auto-fetched from PyPI during the build if the system CMake is older)
+- hwloc development headers — required by the native `tt-umd` build:
+  - Debian/Ubuntu: `sudo apt-get install libhwloc-dev`
+  - Fedora/RHEL: `sudo dnf install hwloc-devel`
+  - Arch: `sudo pacman -S hwloc`
 - [uv](https://github.com/astral-sh/uv) or pip
 
 ## Repository layout

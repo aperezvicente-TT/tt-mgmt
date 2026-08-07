@@ -59,6 +59,7 @@ nanobind_add_module(native
     cpp/src/providers/sysfs_telemetry.cpp
     cpp/src/providers/fabric_manager_provider.cpp
     cpp/src/providers/umd_noc_access.cpp
+    cpp/src/providers/umd_fan_control.cpp
 )
 
 target_include_directories(native PRIVATE

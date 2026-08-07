@@ -37,6 +37,29 @@ def _get_manager(backend: str = "auto", fabric_endpoint: str | None = None):
     return _manager
 
 
+def has_fan_control() -> bool:
+    """Whether the active backend can drive board fans (UMD only)."""
+    try:
+        return bool(_get_manager().has_fan_control())
+    except Exception:
+        return False
+
+
+def get_fan_state(asic_id: int):
+    """Fan state as reported by one ASIC's ARC firmware."""
+    return _get_manager().get_fan_state(asic_id)
+
+
+def set_board_fan(board_id: int, pct: Optional[int]) -> None:
+    """Force every ASIC on a board to `pct` (0-100), or None to release control
+    back to the firmware thermal curve.
+
+    The fan is a board-level resource: the M3 runs it at max() of the per-ASIC
+    targets, so all ASICs on the board are set together.
+    """
+    _get_manager().set_board_fan(board_id, -1 if pct is None else int(pct))
+
+
 def set_backend(backend: str, fabric_endpoint: str | None = None, verbose: bool = False):
     """Set the backend, only recreating the manager if the choice changed."""
     global _manager, _current_backend, _fabric_endpoint

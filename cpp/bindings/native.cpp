@@ -148,6 +148,15 @@ NB_MODULE(native, m) {
         .def_rw("error_message", &PlacementResult::error_message)
         .def_rw("placements", &PlacementResult::placements);
 
+    nb::class_<FanState>(m, "FanState")
+        .def(nb::init<>())
+        .def_rw("supported", &FanState::supported)
+        .def_rw("forced", &FanState::forced)
+        .def_rw("target_pwm", &FanState::target_pwm)
+        .def_rw("target_pct", &FanState::target_pct)
+        .def_rw("fan1_rpm", &FanState::fan1_rpm)
+        .def_rw("fan2_rpm", &FanState::fan2_rpm);
+
     // ---- DeviceManager ----
 
     nb::class_<DeviceManager>(m, "DeviceManager")
@@ -188,7 +197,15 @@ NB_MODULE(native, m) {
              "Write a 32-bit word to device NOC memory")
         .def("get_eth_cores", &DeviceManager::get_eth_cores,
              nb::arg("chip_id"),
-             "Get ETH core NOC0 coordinates as list of (noc_x, noc_y) tuples");
+             "Get ETH core NOC0 coordinates as list of (noc_x, noc_y) tuples")
+        .def("has_fan_control", &DeviceManager::has_fan_control)
+        .def("set_board_fan", &DeviceManager::set_board_fan,
+             nb::arg("board_id"), nb::arg("pct"),
+             "Force every ASIC on a board to a fan PWM percentage (0-100), "
+             "or -1 to release control back to the firmware thermal curve")
+        .def("get_fan_state", &DeviceManager::get_fan_state,
+             nb::arg("asic_id"),
+             "Read the fan state an ASIC currently sees");
 
     // ---- Free functions ----
 

@@ -84,6 +84,19 @@ DeviceCache* UmdDiscoveryProvider::get_cache(uint64_t asic_id) {
     return nullptr;
 }
 
+std::vector<uint64_t> UmdDiscoveryProvider::get_asic_ids_on_board(uint64_t board_id) {
+    if (!initialized_) {
+        initialize();
+    }
+    std::vector<uint64_t> asic_ids;
+    for (auto& [asic_id, cache] : device_cache_) {
+        if (cache.board_id == board_id) {
+            asic_ids.push_back(asic_id);
+        }
+    }
+    return asic_ids;
+}
+
 int UmdDiscoveryProvider::find_mmio_parent_ordinal(uint64_t remote_chip_id) {
     for (auto& [asic_id, cache] : device_cache_) {
         if (cache.is_remote || cache.pci_ordinal < 0) {

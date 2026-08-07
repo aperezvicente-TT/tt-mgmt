@@ -6,7 +6,7 @@ import sys
 import click
 
 from tt_mgmt import ui
-from tt_mgmt.commands import device, smi, record, plot, doctor
+from tt_mgmt.commands import device, smi, record, plot, doctor, fan
 
 console = ui.get_console()
 
@@ -157,6 +157,7 @@ main.add_command(smi.smi)
 main.add_command(doctor.doctor)
 main.add_command(record.record)
 main.add_command(plot.plot)
+main.add_command(fan.fan)
 
 
 if __name__ == '__main__':

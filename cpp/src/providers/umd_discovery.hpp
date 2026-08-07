@@ -49,6 +49,10 @@ public:
     /// Get TTDevice by UMD chip ID (used by NocAccessProvider).
     tt::umd::TTDevice* get_tt_device_by_umd_chip_id(int chip_id);
 
+    /// ASIC ids of every discovered device sharing `board_id`. Used by fan control,
+    /// where the unit of control is the board rather than a single ASIC.
+    std::vector<uint64_t> get_asic_ids_on_board(uint64_t board_id);
+
     /// Return the PCI ordinal of a local MMIO chip that has an ETH link to
     /// the given remote chip, or -1 if none is known. Used by telemetry to
     /// route CHIP_IN_USE checks for remotes to their MMIO parent.

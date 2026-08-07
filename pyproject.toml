@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.4.3", "nanobind>=1.3.2"]
+requires = ["scikit-build-core>=0.10", "nanobind>=1.3.2"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -20,5 +20,11 @@ tt-mgmt = "tt_mgmt.cli:main"
 tt-mgmtd = "tt_mgmt.daemon:main"
 
 [tool.scikit-build]
-minimum-version = "0.4"
+minimum-version = "0.10"
 build-dir = "build/{wheel_tag}"
+
+# tt-umd requires CMake 3.25+. Pinning it here makes scikit-build-core fetch a
+# compliant CMake from PyPI into the isolated build env when the system CMake is
+# too old, so fresh builds don't depend on the distro's CMake version.
+[tool.scikit-build.cmake]
+version = ">=3.25"

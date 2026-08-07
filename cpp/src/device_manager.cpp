@@ -10,6 +10,7 @@
 #include "providers/sysfs_telemetry.hpp"
 #include "providers/fabric_manager_provider.hpp"
 #include "providers/umd_noc_access.hpp"
+#include "providers/umd_fan_control.hpp"
 
 #include "umd/device/pcie/pci_device.hpp"
 
@@ -40,6 +41,10 @@ void DeviceManager::set_fabric_provider(std::unique_ptr<FabricProvider> p) {
 
 void DeviceManager::set_noc_access_provider(std::unique_ptr<NocAccessProvider> p) {
     noc_access_ = std::move(p);
+}
+
+void DeviceManager::set_fan_control_provider(std::unique_ptr<FanControlProvider> p) {
+    fan_control_ = std::move(p);
 }
 
 std::vector<uint8_t> DeviceManager::noc_read(int chip_id, uint32_t noc_x, uint32_t noc_y,
@@ -184,6 +189,27 @@ std::vector<std::pair<uint32_t, uint32_t>> DeviceManager::get_eth_cores(int chip
     return umd_noc->get_eth_cores(chip_id);
 }
 
+// ---- Fan control ----
+
+bool DeviceManager::has_fan_control() const {
+    return fan_control_ != nullptr;
+}
+
+void DeviceManager::set_board_fan(uint64_t board_id, int pct) {
+    if (!fan_control_) {
+        throw std::runtime_error(
+            "No fan control provider configured (requires the UMD backend)");
+    }
+    fan_control_->set_board_fan(board_id, pct);
+}
+
+FanState DeviceManager::get_fan_state(uint64_t asic_id) {
+    if (!fan_control_) {
+        return FanState{};
+    }
+    return fan_control_->get_fan_state(asic_id);
+}
+
 // ---- Factory: UMD (default) ----
 
 std::unique_ptr<DeviceManager> DeviceManager::create_default() {
@@ -194,6 +220,7 @@ std::unique_ptr<DeviceManager> DeviceManager::create_default() {
     mgr->add_telemetry_provider(std::make_unique<UmdTelemetryProvider>(disc_ptr));
     mgr->set_memory_provider(std::make_unique<ShmMemoryProvider>(disc_ptr));
     mgr->set_noc_access_provider(std::make_unique<UmdNocAccessProvider>(disc_ptr));
+    mgr->set_fan_control_provider(std::make_unique<UmdFanControlProvider>(disc_ptr));
     return mgr;
 }
 

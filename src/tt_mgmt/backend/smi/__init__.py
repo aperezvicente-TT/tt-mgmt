@@ -11,6 +11,9 @@ from .core import (
     update_memory,
     cleanup_dead_processes,
     format_bytes,
+    has_fan_control,
+    get_fan_state,
+    set_board_fan,
 )
 
 __all__ = [
@@ -21,4 +24,7 @@ __all__ = [
     "update_memory",
     "cleanup_dead_processes",
     "format_bytes",
+    "has_fan_control",
+    "get_fan_state",
+    "set_board_fan",
 ]

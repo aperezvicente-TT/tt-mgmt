@@ -7,6 +7,7 @@
 #include "providers.hpp"
 #include "fabric_provider.hpp"
 #include "noc_access_provider.hpp"
+#include "fan_control_provider.hpp"
 #include <memory>
 #include <string>
 #include <utility>
@@ -30,6 +31,7 @@ public:
     void set_memory_provider(std::unique_ptr<MemoryProvider> p);
     void set_fabric_provider(std::unique_ptr<FabricProvider> p);
     void set_noc_access_provider(std::unique_ptr<NocAccessProvider> p);
+    void set_fan_control_provider(std::unique_ptr<FanControlProvider> p);
 
     // ---- NOC memory access ----
 
@@ -47,6 +49,18 @@ public:
 
     /// Get ETH core NOC0 coordinates. Returns vector of (noc_x, noc_y).
     std::vector<std::pair<uint32_t, uint32_t>> get_eth_cores(int chip_id);
+
+    // ---- Fan control ----
+
+    /// Whether a fan control provider is configured.
+    bool has_fan_control() const;
+
+    /// Force every ASIC on `board_id` to `pct` (0..100), or -1 to release control
+    /// back to the firmware thermal curve. Throws if unsupported or rejected.
+    void set_board_fan(uint64_t board_id, int pct);
+
+    /// Read the fan state one ASIC currently sees.
+    FanState get_fan_state(uint64_t asic_id);
 
     /// Run discovery and return device list. Subsequent calls return cached results.
     std::vector<DeviceInfo>& discover();
@@ -96,6 +110,7 @@ private:
     std::unique_ptr<MemoryProvider> memory_;
     std::unique_ptr<FabricProvider> fabric_;
     std::unique_ptr<NocAccessProvider> noc_access_;
+    std::unique_ptr<FanControlProvider> fan_control_;
 
     std::vector<DeviceInfo> devices_;
     bool discovered_ = false;
