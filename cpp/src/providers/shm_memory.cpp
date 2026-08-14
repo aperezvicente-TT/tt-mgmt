@@ -20,7 +20,22 @@
 
 namespace tt_device_hal {
 
-// Must match memory_stats_shm.hpp in tt-metal
+// Must match memory_stats_shm.hpp in tt-metal.
+//
+// v3 and v4 are both readable here. v4 appended init_state in what was trailing padding and
+// changed how tt-metal maintains the region -- per-process slots are claimed at attach
+// rather than on first allocation, aggregates and reference_count are derived from the live
+// slots, and a process that dies without unwinding is reclaimed by the next attacher -- but
+// every field read below keeps its offset and meaning, so both versions are handled by the
+// same code. Anything outside that range is a layout we have not seen and is ignored rather
+// than printed as garbage.
+constexpr uint32_t SHM_VERSION_MIN = 3;
+constexpr uint32_t SHM_VERSION_MAX = 4;
+// v4+: written last by whichever process initializes the region. A freshly created region is
+// zero-filled, and a zero chip_id is a real chip, so reading before READY can attribute
+// memory to chip 0 that belongs to nobody.
+constexpr uint32_t SHM_INIT_READY = 0x52454459u;  // 'REDY'
+
 struct SHMDeviceMemoryRegion {
     uint32_t version;
     uint32_t num_active_processes;
@@ -60,8 +75,25 @@ struct SHMDeviceMemoryRegion {
         char process_name[64];
     } processes[MAX_PROCESSES];
 
-    uint8_t padding[64];
+    // v4+, in what v3 left as padding. Reading it on a v3 region yields whatever the padding
+    // holds, so it is only consulted when the version says it is there.
+    std::atomic<uint32_t> init_state;
+    uint8_t padding[60];
 };
+
+static_assert(offsetof(SHMDeviceMemoryRegion, total_dram_allocated) == 48, "tt-metal SHM layout drifted");
+static_assert(offsetof(SHMDeviceMemoryRegion, chip_stats) == 88, "tt-metal SHM layout drifted");
+static_assert(offsetof(SHMDeviceMemoryRegion, processes) == 856, "tt-metal SHM layout drifted");
+static_assert(offsetof(SHMDeviceMemoryRegion, init_state) == 8536, "tt-metal SHM layout drifted");
+
+// True when the region is safe to read: a known layout, and published if it says so.
+inline bool shm_region_readable(const SHMDeviceMemoryRegion* region) {
+    const uint32_t version = region->version;
+    if (version < SHM_VERSION_MIN || version > SHM_VERSION_MAX) {
+        return false;
+    }
+    return version < 4 || region->init_state.load(std::memory_order_acquire) == SHM_INIT_READY;
+}
 
 static std::vector<ProcessMemory> query_registered_processes(int pci_ordinal) {
     std::vector<ProcessMemory> processes;
@@ -162,6 +194,12 @@ bool ShmMemoryProvider::update(DeviceInfo& dev) {
         static_cast<SHMDeviceMemoryRegion*>(mmap(nullptr, sizeof(SHMDeviceMemoryRegion), prot, MAP_SHARED, fd, 0));
 
     if (region == MAP_FAILED) {
+        close(fd);
+        return !dev.processes.empty();
+    }
+
+    if (!shm_region_readable(region)) {
+        munmap(region, sizeof(SHMDeviceMemoryRegion));
         close(fd);
         return !dev.processes.empty();
     }
@@ -272,6 +310,15 @@ int ShmMemoryProvider::cleanup_dead_processes() {
 
         if (region == MAP_FAILED) continue;
 
+        // Never write into a region whose layout we do not know, and never into one that is
+        // still being initialized.
+        if (!shm_region_readable(region)) {
+            munmap(region, sizeof(SHMDeviceMemoryRegion));
+            continue;
+        }
+
+        const bool derives_aggregates = region->version >= 4;
+
         for (uint32_t i = 0; i < SHMDeviceMemoryRegion::MAX_PROCESSES; i++) {
             pid_t pid = region->processes[i].pid.load(std::memory_order_acquire);
             if (pid <= 0) continue;
@@ -299,6 +346,23 @@ int ShmMemoryProvider::cleanup_dead_processes() {
             region->processes[i].pid.store(0, std::memory_order_release);
 
             cleaned++;
+        }
+
+        // From v4 the counts of attached/active processes are derived from the live slots,
+        // so having dropped some, re-derive them here. Otherwise they stay stale until the
+        // next tt-metal process attaches -- which is exactly the situation this cleanup runs
+        // in, i.e. none is running. (tt-metal now reaps dead slots on attach itself, so this
+        // whole pass is a backstop for v4 rather than the only way out of it, as it was for
+        // v3.)
+        if (derives_aggregates) {
+            uint32_t live = 0;
+            for (uint32_t i = 0; i < SHMDeviceMemoryRegion::MAX_PROCESSES; i++) {
+                if (region->processes[i].pid.load(std::memory_order_relaxed) != 0) {
+                    live++;
+                }
+            }
+            region->num_active_processes = live;
+            region->reference_count.store(live, std::memory_order_release);
         }
 
         munmap(region, sizeof(SHMDeviceMemoryRegion));
